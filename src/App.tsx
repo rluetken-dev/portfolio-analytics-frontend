@@ -7,6 +7,8 @@ import { Routes, Route } from "react-router-dom";
 import Home from "./pages/Home";
 import About from "./pages/About";
 import Health from "./pages/Health";
+import NotFound from "./pages/NotFound";
+
 
 // Import components
 import NavBar from "./components/NavBar";
@@ -26,6 +28,7 @@ function App() {
         <Route path="/" element={<Home />} />
         <Route path="/about" element={<About />} />
         <Route path="/health" element={<Health />} />
+        <Route path="*" element={<NotFound />} />
       </Routes>
     </div>
   );

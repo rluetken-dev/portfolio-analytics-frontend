@@ -25,6 +25,9 @@ export default function NavBar() {
       <Link to="/about" style={linkStyle("/about")}>
         About
       </Link>
+      <Link to="/companies" style={linkStyle("/companies")}>
+        Companies
+      </Link>
       <Link to="/health" style={linkStyle("/health")}>
         Health
       </Link>

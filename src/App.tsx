@@ -2,22 +2,32 @@
 
 import React from "react";
 
-// Main App component
-// This is the root of our React application
+// Import routing components
+import { Routes, Route, Link } from "react-router-dom";
+
+// Import our new pages
+import Home from "./pages/Home";
+import About from "./pages/About";
+
 function App() {
   return (
     <div style={{ padding: "2rem", fontFamily: "Arial, sans-serif" }}>
-      {/* Heading for the app */}
-      <h1>📊 Portfolio Analytics Frontend</h1>
+      {/* Navigation Menu */}
+      <nav style={{ marginBottom: "1rem" }}>
+        {/* Link components create client-side navigation */}
+        <Link to="/" style={{ marginRight: "1rem" }}>
+          Home
+        </Link>
+        <Link to="/about">About</Link>
+      </nav>
 
-      {/* Short welcome text */}
-      <p>
-        Welcome! This is the <strong>React + TypeScript + Vite</strong> frontend for the Portfolio
-        Analytics project.
-      </p>
-
-      {/* Placeholder for future components */}
-      <p style={{ color: "gray" }}>🚧 Work in progress — features will be added step by step.</p>
+      {/* Route Definitions */}
+      <Routes>
+        {/* Default page */}
+        <Route path="/" element={<Home />} />
+        {/* About page */}
+        <Route path="/about" element={<About />} />
+      </Routes>
     </div>
   );
 }

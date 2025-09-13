@@ -26,3 +26,4 @@ dist-ssr
 # Env files (keep only .env.example in git)
 .env*
 !.env.example
+*:Zone.Identifier

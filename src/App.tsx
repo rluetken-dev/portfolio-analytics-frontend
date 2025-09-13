@@ -1,35 +1,27 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from '/vite.svg'
-import './App.css'
+// src/App.tsx
 
+import React from "react";
+
+// Main App component
+// This is the root of our React application
 function App() {
-  const [count, setCount] = useState(0)
-
   return (
-    <>
-      <div>
-        <a href="https://vite.dev" target="_blank">
-          <img src={viteLogo} className="logo" alt="Vite logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <h1>Vite + React</h1>
-      <div className="card">
-        <button onClick={() => setCount((count) => count + 1)}>
-          count is {count}
-        </button>
-        <p>
-          Edit <code>src/App.tsx</code> and save to test HMR
-        </p>
-      </div>
-      <p className="read-the-docs">
-        Click on the Vite and React logos to learn more
+    <div style={{ padding: "2rem", fontFamily: "Arial, sans-serif" }}>
+      {/* Heading for the app */}
+      <h1>📊 Portfolio Analytics Frontend</h1>
+
+      {/* Short welcome text */}
+      <p>
+        Welcome! This is the <strong>React + TypeScript + Vite</strong> frontend
+        for the Portfolio Analytics project.
       </p>
-    </>
-  )
+
+      {/* Placeholder for future components */}
+      <p style={{ color: "gray" }}>
+        🚧 Work in progress — features will be added step by step.
+      </p>
+    </div>
+  );
 }
 
-export default App
+export default App;

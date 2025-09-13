@@ -11,11 +11,32 @@ type CompanySummary = {
 };
 
 export default function Companies() {
-  // Local state: list, loading, error, and a small map to track row-level loading
+  // Local state: list, loading, error, row-level refreshing, and batch state
   const [items, setItems] = useState<CompanySummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState<Record<string, boolean>>({});
+  const [batchBusy, setBatchBusy] = useState(false);
+
+  // Helper to refetch the list (so we can reuse it after batch updates)
+  const load = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await fetchJson<CompanySummary[]>({ path: "/api/companies" });
+      setItems(Array.isArray(data) ? data : []);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(msg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Initial load on mount
+  useEffect(() => {
+    void load();
+  }, []);
 
   // A quick index to find/update rows by their symbol
   const indexBySymbol = useMemo(() => {
@@ -26,44 +47,16 @@ export default function Companies() {
     return map;
   }, [items]);
 
-  // Initial load of companies
-  useEffect(() => {
-    let isMounted = true;
-
-    (async () => {
-      try {
-        const data = await fetchJson<CompanySummary[]>({ path: "/api/companies" });
-        if (!isMounted) return;
-        setItems(Array.isArray(data) ? data : []);
-      } catch (err) {
-        if (!isMounted) return;
-        const msg = err instanceof Error ? err.message : String(err);
-        setError(msg);
-      } finally {
-        if (isMounted) setLoading(false);
-      }
-    })();
-
-    return () => {
-      isMounted = false;
-    };
-  }, []);
-
   // Call backend to refresh a single row (name + sector) for a symbol
   const refreshProfile = async (symbol: string) => {
-    // Guard: symbol must exist
     if (!symbol) return;
 
-    // Set row-level spinner/disabled state
     setRefreshing((m) => ({ ...m, [symbol]: true }));
     try {
-      // POST /api/companies/{symbol}/refresh-profile
       const updated = await fetchJson<CompanySummary>({
         path: `/api/companies/${encodeURIComponent(symbol)}/refresh-profile`,
         method: "POST",
       });
-
-      // Optimistically update the row in-place if we still have it in the list
       if (updated?.symbol) {
         const idx = indexBySymbol.get(updated.symbol);
         if (idx !== undefined) {
@@ -76,10 +69,29 @@ export default function Companies() {
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      // Surface error in a simple way; for production you might show a toast
-      alert(`Failed to refresh ${symbol}: ${msg}`);
+      alert(`Failed to refresh ${symbol}: ${msg}`); // keep it simple for now
     } finally {
       setRefreshing((m) => ({ ...m, [symbol]: false }));
+    }
+  };
+
+  // Batch: refresh multiple profiles (server decides which; we pass a limit)
+  const refreshAllProfiles = async () => {
+    setBatchBusy(true);
+    try {
+      // POST /api/companies/refresh-profiles?limit=100
+      await fetchJson<{ count: number; items?: CompanySummary[] }>({
+        path: `/api/companies/refresh-profiles?limit=100`,
+        method: "POST",
+      });
+
+      // Reload the list so we see fresh Name/Sector everywhere
+      await load();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      alert(`Batch refresh failed: ${msg}`);
+    } finally {
+      setBatchBusy(false);
     }
   };
 
@@ -91,6 +103,17 @@ export default function Companies() {
   return (
     <div>
       <h2>🏢 Companies</h2>
+
+      {/* Batch action: refresh multiple profiles (server-driven) */}
+      <div style={{ margin: "0.5rem 0 0.75rem 0" }}>
+        <button
+          title="Fetch Name & Sector for missing entries (server-driven batch)"
+          onClick={refreshAllProfiles}
+          disabled={batchBusy}
+        >
+          {batchBusy ? "Refreshing all…" : "Refresh all profiles"}
+        </button>
+      </div>
 
       {/* Basic table; later we can switch to a UI lib */}
       <table style={{ borderCollapse: "collapse", marginTop: "0.5rem" }}>
@@ -130,7 +153,6 @@ export default function Companies() {
                 </td>
                 <td style={{ padding: "0.25rem 0.5rem", borderBottom: "1px solid #eee" }}>
                   <button
-                    // Keep it simple: disable while request in-flight
                     disabled={!sym || isBusy}
                     onClick={() => refreshProfile(sym)}
                     title="Fetch name & sector from FMP and store in the database"

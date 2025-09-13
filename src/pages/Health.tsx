@@ -1,5 +1,5 @@
 // src/pages/Health.tsx
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { fetchJson } from "../services/api/client";
 
 export default function Health() {

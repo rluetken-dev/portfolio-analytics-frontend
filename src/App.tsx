@@ -12,14 +12,12 @@ function App() {
 
       {/* Short welcome text */}
       <p>
-        Welcome! This is the <strong>React + TypeScript + Vite</strong> frontend
-        for the Portfolio Analytics project.
+        Welcome! This is the <strong>React + TypeScript + Vite</strong> frontend for the Portfolio
+        Analytics project.
       </p>
 
       {/* Placeholder for future components */}
-      <p style={{ color: "gray" }}>
-        🚧 Work in progress — features will be added step by step.
-      </p>
+      <p style={{ color: "gray" }}>🚧 Work in progress — features will be added step by step.</p>
     </div>
   );
 }

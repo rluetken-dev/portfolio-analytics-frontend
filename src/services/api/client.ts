@@ -62,7 +62,7 @@ export async function fetchJson<TResponse = unknown, TBody = unknown>(
     const res = await fetch(url, {
       method,
       headers: {
-        "Accept": "application/json",
+        Accept: "application/json",
         ...(isJsonBody ? { "Content-Type": "application/json" } : {}),
         ...headers,
       },
@@ -76,7 +76,8 @@ export async function fetchJson<TResponse = unknown, TBody = unknown>(
       try {
         // Try to parse server-provided error message first
         const maybeJson = await res.json();
-        errText = typeof maybeJson?.message === "string" ? maybeJson.message : JSON.stringify(maybeJson);
+        errText =
+          typeof maybeJson?.message === "string" ? maybeJson.message : JSON.stringify(maybeJson);
       } catch {
         // Fall back to plain text
         errText = await res.text().catch(() => undefined);
@@ -97,9 +98,9 @@ export async function fetchJson<TResponse = unknown, TBody = unknown>(
   } catch (err: unknown) {
     // Provide a concise, developer-friendly error
     if (err instanceof DOMException && err.name === "AbortError") {
-        throw new Error(`Request timed out after ${timeoutMs}ms: ${method} ${path}`);
-  }
-  throw err;
+      throw new Error(`Request timed out after ${timeoutMs}ms: ${method} ${path}`);
+    }
+    throw err;
   } finally {
     clearTimeout(timer);
   }

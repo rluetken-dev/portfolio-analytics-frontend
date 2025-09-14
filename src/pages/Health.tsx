@@ -47,18 +47,14 @@ export default function Health() {
         Status: <strong>{status}</strong>
         {usedMock && (
           <span style={{ marginLeft: 8, color: "gray" }}>
-            {/* Tell developers that this is a mock, not the real backend */}
-            — using mock (backend unreachable)
+            {/* Tell developers that this is a mock, not the real backend */}— using mock (backend
+            unreachable)
           </span>
         )}
       </p>
 
       {/* Optional: show error details for developers */}
-      {error && (
-        <p style={{ color: "red", marginTop: "0.5rem" }}>
-          Error: {error}
-        </p>
-      )}
+      {error && <p style={{ color: "red", marginTop: "0.5rem" }}>Error: {error}</p>}
     </div>
   );
 }

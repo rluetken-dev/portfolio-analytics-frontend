@@ -24,7 +24,7 @@ It is built with React, TypeScript, and Vite.
 
 ## 📖 Documentation
 
-- [Detailed Documentation](docs/README.md) – extended developer guide, architecture, roadmap  
+- [Detailed Documentation](docs/README.md) – extended developer guide, architecture, roadmap
 - [Commit Guidelines](docs/COMMITS.md) – Conventional Commits standard used across all projects
 
 ## 📝 Notes

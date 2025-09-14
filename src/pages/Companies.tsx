@@ -1,5 +1,6 @@
 // src/pages/Companies.tsx
-import React, { CSSProperties, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties } from "react";
 import { fetchJson } from "../services/api/client";
 
 // Recharts for charts
@@ -397,7 +398,7 @@ export default function Companies() {
                   stroke="#ffffff"
                   strokeWidth={1}
                   label={({ name }) => String(name)} // EN: show sector name on slices
-                  labelLine={{ length: 8 }}
+                  labelLine
                 >
                   {sectorData.map((d, i) => (
                     <Cell key={`cell-${i}`} fill={colorForSector(d.sector)} />

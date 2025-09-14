@@ -2,8 +2,6 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import type { CSSProperties } from "react";
 import { fetchJson } from "../services/api/client";
-
-// Recharts for charts
 import { Tooltip, ResponsiveContainer, Cell, PieChart, Pie } from "recharts";
 
 /** ---------------------------------------------------------------
@@ -13,21 +11,53 @@ const styles = {
   page: { maxWidth: 1024, margin: "0 auto", padding: "16px" },
   headerRow: {
     display: "flex",
-    alignItems: "center",
+    alignItems: "wrap",
     justifyContent: "space-between",
     marginBottom: 8,
   },
   title: { fontSize: 22, fontWeight: 600, margin: 0 },
-  toolbar: { display: "flex", gap: 8 },
+  toolbar: {
+    display: "flex",
+    gap: 8,
+    alignItems: "center",
+    padding: "6px 0", // EN: more breathing room
+  },
 
-  // Button styles (compact)
+  control: {
+    height: 36,                 
+    lineHeight: "36px",
+    minHeight: 0,
+    boxSizing: "border-box",
+    fontSize: 13,
+    borderRadius: 10,
+    padding: "0 10px",          
+  } as CSSProperties,  
+
+  input: {
+    padding: "0 10px",
+    background: "#fff",
+    border: "1px solid #d4d4d8",
+  } as CSSProperties,
+
+  select: {
+    padding: "0 8px",
+    border: "1px solid #d4d4d8",
+    WebkitAppearance: "none",
+    MozAppearance: "none",
+    appearance: "none",
+  } as CSSProperties,
+
   btn: {
-    padding: "6px 10px",
+    padding: "0 12px",          
     borderRadius: 10,
     border: "1px solid #d4d4d8",
     background: "#fff",
     cursor: "pointer",
     fontSize: 13,
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    whiteSpace: "nowrap",       
   } as CSSProperties,
   btnDisabled: { opacity: 0.55, cursor: "not-allowed" } as CSSProperties,
   btnSoft: { background: "#fafafa" } as CSSProperties,
@@ -46,12 +76,11 @@ const styles = {
     border: "1px solid #e5e7eb",
     borderRadius: 12,
     overflow: "hidden",
-    maxHeight: 420, // <- scroll inside after ~15-18 rows
+    maxHeight: 420,
     overflowY: "auto",
   } as CSSProperties,
-
   table: {
-    borderCollapse: "separate" as const, // TS: needs literal type
+    borderCollapse: "separate" as const,
     borderSpacing: 0,
     width: "100%",
   } as CSSProperties,
@@ -83,7 +112,6 @@ const styles = {
       "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
   } as CSSProperties,
 
-  // Chart
   chartCard: {
     border: "1px solid #e5e7eb",
     borderRadius: 12,
@@ -158,6 +186,7 @@ export default function Companies() {
   const [batchBusy, setBatchBusy] = useState(false);
   const [query, setQuery] = useState<string>("");
   const [limit, setLimit] = useState<number>(25); // EN: adjustable server page size
+  const [sectorFilter, setSectorFilter] = useState<string>("All"); // EN: Sector filter (All = no filter)
 
   // Ref for focusing the search input via keyboard shortcut
   const searchRef = useRef<HTMLInputElement>(null);
@@ -199,7 +228,7 @@ export default function Companies() {
   useEffect(() => {
     if (firstRun.current) {
       firstRun.current = false;
-      return; // initial load already happened above
+      return; // EN: initial load already happened above
     }
     const handle = setTimeout(() => {
       void load({ q: query }); // EN: load reads current limit internally
@@ -222,7 +251,7 @@ export default function Companies() {
       if (e.key === "Escape" && document.activeElement === searchRef.current) {
         e.preventDefault();
         setQuery("");
-        void load({}); // Immediate return to the complete list
+        void load({}); // EN: immediate return to the complete list
       }
     };
 
@@ -268,31 +297,28 @@ export default function Companies() {
   };
 
   /** Batch: refresh multiple profiles (server decides which; limit is a hint). */
-  // Replace your refreshAllProfiles with this looped version
   const refreshAllProfiles = async () => {
     setBatchBusy(true);
     try {
-      const batchSize = 10; // small batch to avoid timeouts
+      const batchSize = 10; // EN: small batch to avoid timeouts
       let rounds = 0;
 
-      // keep calling until server returns count = 0
-      // safety cap avoids infinite loops
+      // EN: keep calling until server returns count = 0 (with a safety cap)
       while (rounds < 50) {
         const res = await fetchJson<{ count: number }>({
           path: `/api/companies/refresh-profiles?limit=${batchSize}`,
           method: "POST",
-          // if your fetchJson supports it, this helps avoid client timeouts on slower batches
-          timeoutMs: 45000,
+          timeoutMs: 45_000,
         });
 
         if (!res?.count || res.count === 0) break;
         rounds += 1;
 
-        // short pause to be polite to the upstream API
+        // EN: short pause to be polite to the upstream API
         await new Promise((r) => setTimeout(r, 250));
       }
 
-      // reload current list (keeps active filter)
+      // EN: reload current list (keeps active filter/query/limit)
       await load({ q: query });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -302,17 +328,18 @@ export default function Companies() {
     }
   };
 
-  /** Compute sector aggregation for visualization (desc by count). */
-  const sectorData = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const c of items) {
-      const key = c.sector?.trim() || "Unknown";
-      counts.set(key, (counts.get(key) ?? 0) + 1);
-    }
-    return Array.from(counts.entries())
-      .map(([sector, count]) => ({ sector, count }))
-      .sort((a, b) => b.count - a.count);
+  // EN: Unique sectors from current data (sorted, with "All" first)
+  const sectors = useMemo(() => {
+    const set = new Set<string>();
+    for (const c of items) set.add(c.sector?.trim() || "Unknown");
+    return ["All", ...Array.from(set).sort()];
   }, [items]);
+
+  // EN: Apply sector filter before sorting
+  const filteredItems = useMemo(() => {
+    if (sectorFilter === "All") return items;
+    return items.filter((c) => (c.sector?.trim() || "Unknown") === sectorFilter);
+  }, [items, sectorFilter]);
 
   // EN: Sort state (column + direction)
   type SortKey = "symbol" | "name" | "sector";
@@ -331,7 +358,7 @@ export default function Companies() {
   const toggleSort = (key: SortKey) => {
     setSortKey(key);
     setSortDir((prev) => {
-      if (sortKey !== key) return "asc"; // new column starts asc
+      if (sortKey !== key) return "asc"; // EN: new column starts asc
       if (prev === "none") return "asc";
       if (prev === "asc") return "desc";
       return "none";
@@ -340,13 +367,11 @@ export default function Companies() {
 
   // EN: Memoized sorted list (pure client-side)
   const sortedItems = useMemo(() => {
-    // EN: Inline helper to read a string safely
     const get = (c: CompanySummary, k: SortKey) => (c[k] ?? "").toString().trim();
-
-    if (sortDir === "none") return items;
+    if (sortDir === "none") return filteredItems;
 
     const dir = sortDir === "asc" ? 1 : -1;
-    const out = [...items];
+    const out = [...filteredItems];
 
     out.sort((a, b) => {
       const av = get(a, sortKey);
@@ -354,18 +379,27 @@ export default function Companies() {
 
       const aEmpty = av.length === 0;
       const bEmpty = bv.length === 0;
-
-      // EN: Push empty values to the end (nulls last) regardless of direction
-      if (aEmpty && !bEmpty) return 1;
+      if (aEmpty && !bEmpty) return 1; // EN: nulls/empties last
       if (!aEmpty && bEmpty) return -1;
       if (aEmpty && bEmpty) return 0;
 
-      // EN: Locale-aware, natural compare; multiply by dir for ASC/DESC
-      return collator.compare(av, bv) * dir;
+      return collator.compare(av, bv) * dir; // EN: natural, locale-aware
     });
 
     return out;
-  }, [items, sortKey, sortDir, collator]);
+  }, [filteredItems, sortKey, sortDir, collator]);
+
+  // EN: sector aggregation should reflect current filter
+  const sectorData = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const c of filteredItems) {
+      const key = c.sector?.trim() || "Unknown";
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    return Array.from(counts.entries())
+      .map(([sector, count]) => ({ sector, count }))
+      .sort((a, b) => b.count - a.count);
+  }, [filteredItems]);
 
   // --- Render states ---
   if (error) return <p style={{ color: "red" }}>Error: {error}</p>;
@@ -383,18 +417,18 @@ export default function Companies() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             style={{
-              padding: "6px 10px",
-              borderRadius: 10,
-              border: "1px solid #d4d4d8",
-              fontSize: 13,
-              minWidth: 260,
+              ...styles.control,
+              ...styles.input,
+              //minWidth: 50,
             }}
             aria-label="Search companies"
           />
 
-          {/* EN: Fixed-width status showing live result count */}
+          {/* EN: Status shows filtered+sorted count */}
           <span style={{ minWidth: 120, fontSize: 12, color: "#666" }} aria-live="polite">
-            {loading ? "Searching…" : `${items.length} result${items.length === 1 ? "" : "s"}`}
+            {loading
+              ? "Searching…"
+              : `${sortedItems.length} result${sortedItems.length === 1 ? "" : "s"}`}
           </span>
 
           {/* Rows selector */}
@@ -410,11 +444,9 @@ export default function Companies() {
                 setLimit(next);
                 void load({ q: query, limit: next }); // EN: fetch immediately with new limit
               }}
-              style={{
-                padding: "6px 8px",
-                borderRadius: 10,
-                border: "1px solid #d4d4d8",
-                fontSize: 13,
+             style={{
+                ...styles.control,
+                ...styles.select,
               }}
               aria-label="Rows per request"
             >
@@ -425,10 +457,38 @@ export default function Companies() {
             </select>
           </div>
 
+          {/* EN: Sector filter dropdown */}
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <label htmlFor="sector" style={{ fontSize: 12, color: "#666" }}>
+              Sector
+            </label>
+            <select
+              id="sector"
+              value={sectorFilter}
+              onChange={(e) => setSectorFilter(e.target.value)}
+              style={{
+                ...styles.control,
+                ...styles.select,
+              }}
+              aria-label="Filter by sector"
+            >
+              {sectors.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
+          </div>
+
           <button
             onClick={() => void load({ q: query })}
             disabled={batchBusy}
-            style={{ ...styles.btn, ...(batchBusy ? styles.btnDisabled : {}), ...styles.btnSoft }}
+             style={{
+              ...styles.control,
+              ...styles.btn,
+              ...(batchBusy ? styles.btnDisabled : {}),
+              ...styles.btnSoft,
+            }}
             title="Reload list from server"
           >
             Reload list
@@ -437,7 +497,12 @@ export default function Companies() {
           <button
             onClick={refreshAllProfiles}
             disabled={batchBusy}
-            style={{ ...styles.btn, ...(batchBusy ? styles.btnDisabled : {}) }}
+            style={{
+              ...styles.control,
+              ...styles.btn,
+              ...(batchBusy ? styles.btnDisabled : {}),
+              ...styles.btnSoft,
+            }}
             title="Fetch Name & Sector for missing entries (server-driven batch)"
           >
             {batchBusy ? "Refreshing all…" : "Refresh all profiles"}
@@ -459,7 +524,6 @@ export default function Companies() {
                     tabIndex={0} // EN: focusable for keyboard
                     onClick={() => toggleSort("symbol")}
                     onKeyDown={(e) => {
-                      // EN: activate with Enter/Space
                       if (e.key === "Enter" || e.key === " ") toggleSort("symbol");
                     }}
                     aria-sort={
@@ -525,6 +589,9 @@ export default function Companies() {
                     {sortKey === "sector" &&
                       (sortDir === "asc" ? "▲" : sortDir === "desc" ? "▼" : "")}
                   </th>
+
+                  {/* EN: Actions column header (align right) */}
+                  <th style={{ ...styles.th, textAlign: "right" }}>Actions</th>
                 </tr>
               </thead>
               <tbody>

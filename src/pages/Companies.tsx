@@ -1,5 +1,5 @@
 // src/pages/Companies.tsx
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import type { CSSProperties } from "react";
 import { fetchJson } from "../services/api/client";
 
@@ -157,36 +157,42 @@ export default function Companies() {
   const [refreshing, setRefreshing] = useState<Record<string, boolean>>({});
   const [batchBusy, setBatchBusy] = useState(false);
   const [query, setQuery] = useState<string>("");
+  const [limit] = useState<number>(50); // EN: Server page size for /api/companies?limit=...
 
   // Ref for focusing the search input via keyboard shortcut
   const searchRef = useRef<HTMLInputElement>(null);
 
   /** Helper to refetch the list (centralizes side-effects).
    *  EN: Pure server-side search via ?q=... (symbol OR name, case-insensitive) */
-  const load = async (opts?: { q?: string }) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const raw = opts?.q?.trim() ?? "";
-      const params = new URLSearchParams();
-      if (raw) params.set("q", raw);
+  const load = useCallback(
+    async (opts?: { q?: string; limit?: number }) => {
+      setLoading(true);
+      setError(null);
+      try {
+        const raw = opts?.q?.trim() ?? "";
+        const lim = opts?.limit ?? limit; // EN: default to current state
+        const params = new URLSearchParams();
+        if (raw) params.set("q", raw);
+        if (lim) params.set("limit", String(lim));
 
-      const path = params.toString() ? `/api/companies?${params.toString()}` : `/api/companies`;
-      const data = await fetchJson<CompanySummary[]>({ path });
+        const path = params.toString() ? `/api/companies?${params.toString()}` : `/api/companies`;
+        const data = await fetchJson<CompanySummary[]>({ path });
 
-      setItems(Array.isArray(data) ? data : []);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setError(msg);
-    } finally {
-      setLoading(false);
-    }
-  };
+        setItems(Array.isArray(data) ? data : []);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        setError(msg);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [limit],
+  );
 
   // Initial load on mount
   useEffect(() => {
     void load();
-  }, []);
+  }, [load]);
 
   /** EN: Debounced search-as-you-type (skip initial render). */
   const firstRun = useRef(true);
@@ -196,34 +202,33 @@ export default function Companies() {
       return; // initial load already happened above
     }
     const handle = setTimeout(() => {
-      void load({ q: query });
+      void load({ q: query }); // EN: load reads current limit internally
     }, 300);
     return () => clearTimeout(handle);
-  }, [query]);
+  }, [query, load]);
 
   useEffect(() => {
-  const onKeyDown = (e: KeyboardEvent) => {
-    const isMac = navigator.platform.toUpperCase().includes("MAC");
+    const onKeyDown = (e: KeyboardEvent) => {
+      const isMac = navigator.platform.toUpperCase().includes("MAC");
 
-    // Ctrl/⌘ + K → Focus on search field
-    if ((isMac ? e.metaKey : e.ctrlKey) && e.key.toLowerCase() === "k") {
-      e.preventDefault();
-      searchRef.current?.focus();
-      return;
-    }
+      // Ctrl/⌘ + K → Focus on search field
+      if ((isMac ? e.metaKey : e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        searchRef.current?.focus();
+        return;
+      }
 
-    // Esc in the search field → clear + immediately load full list
-    if (e.key === "Escape" && document.activeElement === searchRef.current) {
-      e.preventDefault();
-      setQuery("");
-      void load({}); // Immediate return to the complete list
-    }
-  };
+      // Esc in the search field → clear + immediately load full list
+      if (e.key === "Escape" && document.activeElement === searchRef.current) {
+        e.preventDefault();
+        setQuery("");
+        void load({}); // Immediate return to the complete list
+      }
+    };
 
-  window.addEventListener("keydown", onKeyDown);
-  return () => window.removeEventListener("keydown", onKeyDown);
-}, []);
-
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [load]);
 
   /** Quick index to find/update rows by their symbol. */
   const indexBySymbol = useMemo(() => {
@@ -316,9 +321,9 @@ export default function Companies() {
             aria-label="Search companies"
           />
 
-          {/* Fixed status width so that nothing jumps around */}
-          <span style={{ minWidth: 80, fontSize: 12, color: "#666" }} aria-live="polite">
-            {loading ? "Searching…" : " "}
+          {/* EN: Fixed-width status showing live result count */}
+          <span style={{ minWidth: 120, fontSize: 12, color: "#666" }} aria-live="polite">
+            {loading ? "Searching…" : `${items.length} result${items.length === 1 ? "" : "s"}`}
           </span>
 
           <button

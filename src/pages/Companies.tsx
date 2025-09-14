@@ -314,6 +314,59 @@ export default function Companies() {
       .sort((a, b) => b.count - a.count);
   }, [items]);
 
+  // EN: Sort state (column + direction)
+  type SortKey = "symbol" | "name" | "sector";
+  type SortDir = "asc" | "desc" | "none";
+
+  // EN: Locale-aware, case-insensitive, natural sorting (e.g., A2 < A10)
+  const collator = useMemo(
+    () => new Intl.Collator(undefined, { numeric: true, sensitivity: "base" }),
+    [],
+  );
+
+  const [sortKey, setSortKey] = useState<SortKey>("symbol"); // EN: default
+  const [sortDir, setSortDir] = useState<SortDir>("none"); // EN: none = as-loaded
+
+  // EN: Toggle sort direction in a cycle: none -> asc -> desc -> none
+  const toggleSort = (key: SortKey) => {
+    setSortKey(key);
+    setSortDir((prev) => {
+      if (sortKey !== key) return "asc"; // new column starts asc
+      if (prev === "none") return "asc";
+      if (prev === "asc") return "desc";
+      return "none";
+    });
+  };
+
+  // EN: Memoized sorted list (pure client-side)
+  const sortedItems = useMemo(() => {
+    // EN: Inline helper to read a string safely
+    const get = (c: CompanySummary, k: SortKey) => (c[k] ?? "").toString().trim();
+
+    if (sortDir === "none") return items;
+
+    const dir = sortDir === "asc" ? 1 : -1;
+    const out = [...items];
+
+    out.sort((a, b) => {
+      const av = get(a, sortKey);
+      const bv = get(b, sortKey);
+
+      const aEmpty = av.length === 0;
+      const bEmpty = bv.length === 0;
+
+      // EN: Push empty values to the end (nulls last) regardless of direction
+      if (aEmpty && !bEmpty) return 1;
+      if (!aEmpty && bEmpty) return -1;
+      if (aEmpty && bEmpty) return 0;
+
+      // EN: Locale-aware, natural compare; multiply by dir for ASC/DESC
+      return collator.compare(av, bv) * dir;
+    });
+
+    return out;
+  }, [items, sortKey, sortDir, collator]);
+
   // --- Render states ---
   if (error) return <p style={{ color: "red" }}>Error: {error}</p>;
 
@@ -400,14 +453,82 @@ export default function Companies() {
             <table style={styles.table}>
               <thead style={styles.thead}>
                 <tr>
-                  <th style={styles.th}>Symbol</th>
-                  <th style={styles.th}>Name</th>
-                  <th style={styles.th}>Sector</th>
-                  <th style={{ ...styles.th, textAlign: "right" }}>Actions</th>
+                  <th
+                    style={styles.th}
+                    role="button"
+                    tabIndex={0} // EN: focusable for keyboard
+                    onClick={() => toggleSort("symbol")}
+                    onKeyDown={(e) => {
+                      // EN: activate with Enter/Space
+                      if (e.key === "Enter" || e.key === " ") toggleSort("symbol");
+                    }}
+                    aria-sort={
+                      sortKey === "symbol"
+                        ? sortDir === "asc"
+                          ? "ascending"
+                          : sortDir === "desc"
+                            ? "descending"
+                            : "none"
+                        : "none"
+                    }
+                    title="Sort by symbol"
+                  >
+                    Symbol{" "}
+                    {sortKey === "symbol" &&
+                      (sortDir === "asc" ? "▲" : sortDir === "desc" ? "▼" : "")}
+                  </th>
+
+                  <th
+                    style={styles.th}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => toggleSort("name")}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") toggleSort("name");
+                    }}
+                    aria-sort={
+                      sortKey === "name"
+                        ? sortDir === "asc"
+                          ? "ascending"
+                          : sortDir === "desc"
+                            ? "descending"
+                            : "none"
+                        : "none"
+                    }
+                    title="Sort by name"
+                  >
+                    Name{" "}
+                    {sortKey === "name" &&
+                      (sortDir === "asc" ? "▲" : sortDir === "desc" ? "▼" : "")}
+                  </th>
+
+                  <th
+                    style={styles.th}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => toggleSort("sector")}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") toggleSort("sector");
+                    }}
+                    aria-sort={
+                      sortKey === "sector"
+                        ? sortDir === "asc"
+                          ? "ascending"
+                          : sortDir === "desc"
+                            ? "descending"
+                            : "none"
+                        : "none"
+                    }
+                    title="Sort by sector"
+                  >
+                    Sector{" "}
+                    {sortKey === "sector" &&
+                      (sortDir === "asc" ? "▲" : sortDir === "desc" ? "▼" : "")}
+                  </th>
                 </tr>
               </thead>
               <tbody>
-                {items.map((c, idx) => {
+                {sortedItems.map((c, idx) => {
                   // EN: Avoid duplicate symbol/name → show em dash if identical or empty
                   const safeName = c.name && c.name !== c.symbol ? c.name : "—";
                   const sym = c.symbol ?? "";

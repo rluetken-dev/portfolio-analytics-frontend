@@ -158,6 +158,9 @@ export default function Companies() {
   const [batchBusy, setBatchBusy] = useState(false);
   const [query, setQuery] = useState<string>("");
 
+  // Ref for focusing the search input via keyboard shortcut
+  const searchRef = useRef<HTMLInputElement>(null);
+
   /** Helper to refetch the list (centralizes side-effects).
    *  EN: Pure server-side search via ?q=... (symbol OR name, case-insensitive) */
   const load = async (opts?: { q?: string }) => {
@@ -197,6 +200,30 @@ export default function Companies() {
     }, 300);
     return () => clearTimeout(handle);
   }, [query]);
+
+  useEffect(() => {
+  const onKeyDown = (e: KeyboardEvent) => {
+    const isMac = navigator.platform.toUpperCase().includes("MAC");
+
+    // Ctrl/⌘ + K → Focus on search field
+    if ((isMac ? e.metaKey : e.ctrlKey) && e.key.toLowerCase() === "k") {
+      e.preventDefault();
+      searchRef.current?.focus();
+      return;
+    }
+
+    // Esc in the search field → clear + immediately load full list
+    if (e.key === "Escape" && document.activeElement === searchRef.current) {
+      e.preventDefault();
+      setQuery("");
+      void load({}); // Immediate return to the complete list
+    }
+  };
+
+  window.addEventListener("keydown", onKeyDown);
+  return () => window.removeEventListener("keydown", onKeyDown);
+}, []);
+
 
   /** Quick index to find/update rows by their symbol. */
   const indexBySymbol = useMemo(() => {
@@ -274,6 +301,7 @@ export default function Companies() {
         <h2 style={styles.title}>🏢 Companies</h2>
         <div style={styles.toolbar}>
           <input
+            ref={searchRef}
             type="text"
             placeholder="Search by symbol or name…"
             value={query}

@@ -157,7 +157,7 @@ export default function Companies() {
   const [refreshing, setRefreshing] = useState<Record<string, boolean>>({});
   const [batchBusy, setBatchBusy] = useState(false);
   const [query, setQuery] = useState<string>("");
-  const [limit] = useState<number>(50); // EN: Server page size for /api/companies?limit=...
+  const [limit, setLimit] = useState<number>(25); // EN: adjustable server page size
 
   // Ref for focusing the search input via keyboard shortcut
   const searchRef = useRef<HTMLInputElement>(null);
@@ -268,14 +268,32 @@ export default function Companies() {
   };
 
   /** Batch: refresh multiple profiles (server decides which; limit is a hint). */
+  // Replace your refreshAllProfiles with this looped version
   const refreshAllProfiles = async () => {
     setBatchBusy(true);
     try {
-      await fetchJson<{ count: number; items?: CompanySummary[] }>({
-        path: `/api/companies/refresh-profiles?limit=100`,
-        method: "POST",
-      });
-      await load({ q: query }); // reload with current filter
+      const batchSize = 10; // small batch to avoid timeouts
+      let rounds = 0;
+
+      // keep calling until server returns count = 0
+      // safety cap avoids infinite loops
+      while (rounds < 50) {
+        const res = await fetchJson<{ count: number }>({
+          path: `/api/companies/refresh-profiles?limit=${batchSize}`,
+          method: "POST",
+          // if your fetchJson supports it, this helps avoid client timeouts on slower batches
+          timeoutMs: 45000,
+        });
+
+        if (!res?.count || res.count === 0) break;
+        rounds += 1;
+
+        // short pause to be polite to the upstream API
+        await new Promise((r) => setTimeout(r, 250));
+      }
+
+      // reload current list (keeps active filter)
+      await load({ q: query });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       alert(`Batch refresh failed: ${msg}`);
@@ -325,6 +343,34 @@ export default function Companies() {
           <span style={{ minWidth: 120, fontSize: 12, color: "#666" }} aria-live="polite">
             {loading ? "Searching…" : `${items.length} result${items.length === 1 ? "" : "s"}`}
           </span>
+
+          {/* Rows selector */}
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <label htmlFor="rows" style={{ fontSize: 12, color: "#666" }}>
+              Rows
+            </label>
+            <select
+              id="rows"
+              value={limit}
+              onChange={(e) => {
+                const next = Number(e.target.value);
+                setLimit(next);
+                void load({ q: query, limit: next }); // EN: fetch immediately with new limit
+              }}
+              style={{
+                padding: "6px 8px",
+                borderRadius: 10,
+                border: "1px solid #d4d4d8",
+                fontSize: 13,
+              }}
+              aria-label="Rows per request"
+            >
+              <option value={25}>25</option>
+              <option value={50}>50</option>
+              <option value={100}>100</option>
+              <option value={200}>200</option>
+            </select>
+          </div>
 
           <button
             onClick={() => void load({ q: query })}

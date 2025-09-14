@@ -13,6 +13,11 @@ export interface FetchJsonOptions<TBody = unknown> {
   body?: TBody; // will be JSON-stringified if provided
   headers?: Record<string, string>;
   timeoutMs?: number; // default timeout for slow requests
+  retry?: {
+    attempts?: number; // total tries incl. first (default 4)
+    initialDelayMs?: number; // (default 400)
+    maxDelayMs?: number; // (default 5000)
+  };
 }
 
 /**
@@ -22,86 +27,147 @@ export interface FetchJsonOptions<TBody = unknown> {
 const API_BASE_URL =
   (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/+$/, "") || "";
 
-/**
- * Basic guard to ensure base URL is set when required.
- * We don't throw immediately to keep the function reusable for relative mocks.
- */
+/** EN: Build absolute URL (or keep relative for mocks/previews). */
 function buildUrl(path: string): string {
-  // Ensure path starts with a single slash
   const normalizedPath = path.startsWith("/") ? path : `/${path}`;
-  // If API_BASE_URL is empty, fall back to relative (useful in preview/mocks)
   return `${API_BASE_URL}${normalizedPath}`;
+}
+
+/** ---------------- Retry helpers ------------------ */
+
+function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+function parseRetryAfter(headers: Headers): number | null {
+  const ra = headers.get("Retry-After");
+  if (!ra) return null;
+  const secs = Number(ra);
+  if (Number.isFinite(secs)) return Math.max(0, secs * 1000);
+  const when = Date.parse(ra);
+  if (!Number.isNaN(when)) {
+    const delta = when - Date.now();
+    return delta > 0 ? delta : 0;
+  }
+  return null;
+}
+
+function isRetrySafe(method: HttpMethod, path: string, hasBody: boolean): boolean {
+  if (method === "GET") return true;
+  const isRefresh = /\/api\/companies(\/refresh-profiles|\/[^/]+\/refresh-profile)\b/i.test(path);
+  return method === "POST" && !hasBody && isRefresh;
+}
+
+function shouldRetryStatus(status: number): boolean {
+  return status === 429 || status === 500 || status === 502 || status === 503 || status === 504;
+}
+
+/** Custom Error type with status code */
+interface HttpError extends Error {
+  status?: number;
 }
 
 /**
  * Generic JSON fetch with:
  * - AbortController-based timeout
  * - JSON body serialization
- * - Basic error handling with helpful messages
+ * - Error handling with server details
+ * - Safe retries for 429/5xx (GET and body-less refresh POSTs)
  */
 export async function fetchJson<TResponse = unknown, TBody = unknown>(
   options: FetchJsonOptions<TBody>,
 ): Promise<TResponse> {
-  const {
-    method = "GET",
-    path,
-    body,
-    headers = {},
-    timeoutMs = 10_000, // 10s default timeout
-  } = options;
+  const { method = "GET", path, body, headers = {}, timeoutMs = 10_000, retry } = options;
 
   const url = buildUrl(path);
+  const hasBody = body !== undefined && body !== null;
 
-  // Setup an abortable timeout to avoid hanging requests
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const attempts = retry?.attempts ?? 4;
+  const baseDelay = retry?.initialDelayMs ?? 400;
+  const maxDelay = retry?.maxDelayMs ?? 5000;
 
-  try {
-    const isJsonBody = body !== undefined && body !== null;
+  let lastErr: unknown;
 
-    const res = await fetch(url, {
-      method,
-      headers: {
-        Accept: "application/json",
-        ...(isJsonBody ? { "Content-Type": "application/json" } : {}),
-        ...headers,
-      },
-      body: isJsonBody ? JSON.stringify(body) : undefined,
-      signal: controller.signal,
-    });
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
 
-    // Non-2xx responses are treated as errors with details if possible
-    if (!res.ok) {
-      let errText: string | undefined;
-      try {
-        // Try to parse server-provided error message first
-        const maybeJson = await res.json();
-        errText =
-          typeof maybeJson?.message === "string" ? maybeJson.message : JSON.stringify(maybeJson);
-      } catch {
-        // Fall back to plain text
-        errText = await res.text().catch(() => undefined);
+    try {
+      const res = await fetch(url, {
+        method,
+        headers: {
+          Accept: "application/json",
+          ...(hasBody ? { "Content-Type": "application/json" } : {}),
+          ...headers,
+        },
+        body: hasBody ? JSON.stringify(body) : undefined,
+        signal: controller.signal,
+      });
+
+      if (
+        shouldRetryStatus(res.status) &&
+        isRetrySafe(method, path, hasBody) &&
+        attempt < attempts
+      ) {
+        const retryAfterMs = parseRetryAfter(res.headers);
+        const backoff = Math.min(
+          maxDelay,
+          retryAfterMs ??
+            Math.round(baseDelay * Math.pow(2, attempt - 1) * (1 + Math.random() * 0.25)),
+        );
+        clearTimeout(timer);
+        await sleep(backoff);
+        continue;
       }
 
-      throw new Error(
-        `HTTP ${res.status} ${res.statusText} for ${method} ${path}` +
-          (errText ? ` — ${errText}` : ""),
-      );
-    }
+      if (!res.ok) {
+        try {
+          type ErrorPayload = { message?: string; [k: string]: unknown };
+          const maybeJson = (await res.json()) as ErrorPayload;
+          const err: HttpError = new Error(
+            `HTTP ${res.status} ${res.statusText} for ${method} ${path}` +
+              (maybeJson.message ? ` — ${maybeJson.message}` : ` — ${JSON.stringify(maybeJson)}`),
+          );
+          err.status = res.status;
+          throw err;
+        } catch {
+          const text = await res.text().catch(() => "");
+          const err: HttpError = new Error(
+            `HTTP ${res.status} ${res.statusText} for ${method} ${path}` +
+              (text ? ` — ${text}` : ""),
+          );
+          err.status = res.status;
+          throw err;
+        }
+      }
 
-    // Attempt to parse JSON; if empty body, return undefined as any
-    const text = await res.text();
-    if (!text) return undefined as TResponse;
+      const text = await res.text();
+      clearTimeout(timer);
+      return (text ? JSON.parse(text) : undefined) as TResponse;
+    } catch (err) {
+      clearTimeout(timer);
+      lastErr = err;
 
-    // Parse JSON response
-    return JSON.parse(text) as TResponse;
-  } catch (err: unknown) {
-    // Provide a concise, developer-friendly error
-    if (err instanceof DOMException && err.name === "AbortError") {
-      throw new Error(`Request timed out after ${timeoutMs}ms: ${method} ${path}`);
+      const isAbort = err instanceof DOMException && err.name === "AbortError";
+      const isHttpError = typeof (err as { status?: number }).status === "number";
+      const isNet = !isAbort && !isHttpError;
+
+      if (
+        (isAbort || isNet) &&
+        isRetrySafe(method as HttpMethod, path, hasBody) &&
+        attempt < attempts
+      ) {
+        const backoff = Math.min(
+          maxDelay,
+          Math.round(baseDelay * Math.pow(2, attempt - 1) * (1 + Math.random() * 0.25)),
+        );
+        await sleep(backoff);
+        continue;
+      }
+
+      throw err;
     }
-    throw err;
-  } finally {
-    clearTimeout(timer);
   }
+
+  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
 }

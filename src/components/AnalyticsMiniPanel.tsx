@@ -28,24 +28,53 @@ type TimeseriesPoint = { date: string; close: number };
 // persist the last used symbol (dev-friendly)
 const STORAGE_KEY = "analytics:lastSymbol";
 
-// Simple skeleton card for loading state (no extra deps)
+// English: shared grid style so all sections render with identical column sizing
+const GRID: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(6, minmax(0, 1fr))", // consistent width
+  gap: 6, // tighter spacing
+  justifyItems: "stretch",
+  //outline: "1px dashed #555",
+};
+
+const CARD: React.CSSProperties = {
+  // English: allow shrink inside grid track; prevent content from stretching columns
+  border: "1px solid #333",
+  borderRadius: 8,
+  padding: 6,
+  minHeight: 54,
+  minWidth: 0, // <-- critical: let the card shrink within the grid column
+  overflow: "hidden", // <-- avoid layout push; long text won't expand the column
+  width: "100%",
+};
+
+const HINT: React.CSSProperties = {
+  fontSize: 10,
+  opacity: 0.7,
+  marginTop: 2,
+  whiteSpace: "nowrap", // keep hint on a single line
+  overflow: "hidden", // clip if too long
+  textOverflow: "ellipsis",
+};
+
+// Compact skeleton card used while loading
 function SkeletonCard({ label }: { label: string }) {
   return (
     <div
       style={{
         border: "1px solid #333",
-        borderRadius: 12,
-        padding: 10,
-        minHeight: 72,
+        borderRadius: 8, // tighter corners
+        padding: 6, // smaller padding
+        minHeight: 54, // shorter card
       }}
       aria-busy="true"
       aria-live="polite"
     >
-      <div style={{ fontSize: 12, opacity: 0.6 }}>{label}</div>
+      <div style={{ fontSize: 10, opacity: 0.6 }}>{label}</div>
       <div
         style={{
           marginTop: 6,
-          height: 22,
+          height: 18, // slimmer shimmer bar
           borderRadius: 6,
           background:
             "linear-gradient(90deg, rgba(255,255,255,0.08) 25%, rgba(255,255,255,0.18) 37%, rgba(255,255,255,0.08) 63%)",
@@ -61,6 +90,37 @@ function SkeletonCard({ label }: { label: string }) {
       </style>
     </div>
   );
+}
+
+// English: compact number formatter for big absolutes (K/M/B/T)
+function formatCompactNumber(n: number): string {
+  const abs = Math.abs(n);
+  const fmt = (v: number, s: string) =>
+    // fewer decimals for bigger magnitudes
+    `${v >= 100 ? v.toFixed(0) : v >= 10 ? v.toFixed(1) : v.toFixed(2)}${s}`;
+
+  if (abs >= 1e12) return fmt(n / 1e12, "T");
+  if (abs >= 1e9) return fmt(n / 1e9, "B");
+  if (abs >= 1e6) return fmt(n / 1e6, "M");
+  if (abs >= 1e3) return fmt(n / 1e3, "K");
+  return abs >= 100 ? n.toFixed(0) : abs >= 10 ? n.toFixed(1) : n.toFixed(2);
+}
+
+// English: unified format helpers
+function formatPercent(v: number | null | undefined): string {
+  if (v == null || Number.isNaN(v)) return "n/a";
+  return `${(v * 100).toFixed(1)}%`;
+}
+
+function formatRatio(v: number | null | undefined): string {
+  if (v == null || Number.isNaN(v)) return "n/a";
+  return `${v.toFixed(2)}x`;
+}
+
+function formatPerShare(v: number | null | undefined, unit?: string): string {
+  if (v == null || Number.isNaN(v)) return "n/a";
+  // Keep 2 decimals and append unit (USD/EUR) if provided
+  return `${v.toFixed(2)}${unit ? ` ${unit}` : ""}`;
 }
 
 // Format Date -> "YYYY-MM-DD"
@@ -115,6 +175,13 @@ async function fetchMetricNumber(
   }
   return { value: null, status: resp.status };
 }
+
+// English: build a per-section row grid that spans the full width
+const makeRowGrid = (cols: number): React.CSSProperties => ({
+  display: "grid",
+  gridTemplateColumns: `repeat(${Math.max(cols, 1)}, minmax(0, 1fr))`,
+  gap: 6,
+});
 
 export default function AnalyticsMiniPanel() {
   const [symbol, setSymbol] = useState("AAPL");
@@ -272,17 +339,17 @@ export default function AnalyticsMiniPanel() {
             },
             {
               label: "P/E",
-              value: peRes.value != null ? peRes.value.toFixed(2) : "n/a",
+              value: peRes.value != null ? formatRatio(peRes.value) : "n/a",
               hint: peRes.status === 200 ? undefined : `HTTP ${peRes.status}`,
             },
             {
               label: "P/B",
-              value: pbRes.value != null ? pbRes.value.toFixed(2) : "n/a",
+              value: pbRes.value != null ? formatRatio(pbRes.value) : "n/a",
               hint: pbRes.status === 200 ? undefined : `HTTP ${pbRes.status}`,
             },
             {
               label: "P/OE",
-              value: pToOeRes.value != null ? pToOeRes.value.toFixed(2) : "n/a",
+              value: pToOeRes.value != null ? formatRatio(pToOeRes.value) : "n/a",
               hint: pToOeRes.status === 200 ? undefined : `HTTP ${pToOeRes.status}`,
             },
           ],
@@ -292,34 +359,32 @@ export default function AnalyticsMiniPanel() {
           items: [
             {
               label: "ROE",
-              value: roeRes.value != null ? `${(roeRes.value * 100).toFixed(1)}%` : "n/a",
+              value: formatPercent(roeRes.value),
               hint: roeRes.status === 200 ? undefined : `HTTP ${roeRes.status}`,
             },
             {
               label: "ROA",
-              value: roaRes.value != null ? `${(roaRes.value * 100).toFixed(1)}%` : "n/a",
+              value: formatPercent(roaRes.value),
               hint: roaRes.status === 200 ? undefined : `HTTP ${roaRes.status}`,
             },
             {
               label: "Net Margin",
-              value:
-                netMarginRes.value != null ? `${(netMarginRes.value * 100).toFixed(1)}%` : "n/a",
+              value: formatPercent(netMarginRes.value),
               hint: netMarginRes.status === 200 ? undefined : `HTTP ${netMarginRes.status}`,
             },
             {
               label: "FCF Yield",
-              value: fcfYieldRes.value != null ? `${(fcfYieldRes.value * 100).toFixed(1)}%` : "n/a",
+              value: formatPercent(fcfYieldRes.value),
               hint: fcfYieldRes.status === 200 ? undefined : `HTTP ${fcfYieldRes.status}`,
             },
             {
               label: "FCF Margin",
-              value:
-                fcfMarginRes.value != null ? `${(fcfMarginRes.value * 100).toFixed(1)}%` : "n/a",
+              value: formatPercent(fcfMarginRes.value),
               hint: fcfMarginRes.status === 200 ? undefined : `HTTP ${fcfMarginRes.status}`,
             },
             {
               label: "OE Yield",
-              value: oeYieldRes.value != null ? `${(oeYieldRes.value * 100).toFixed(1)}%` : "n/a",
+              value: formatPercent(oeYieldRes.value),
               hint: oeYieldRes.status === 200 ? undefined : `HTTP ${oeYieldRes.status}`,
             },
           ],
@@ -329,17 +394,17 @@ export default function AnalyticsMiniPanel() {
           items: [
             {
               label: "Debt/Equity",
-              value: dteRes.value != null ? dteRes.value.toFixed(2) : "n/a",
+              value: dteRes.value != null ? formatRatio(dteRes.value) : "n/a",
               hint: dteRes.status === 200 ? undefined : `HTTP ${dteRes.status}`,
             },
             {
               label: "Debt/Assets",
-              value: dtaRes.value != null ? `${(dtaRes.value * 100).toFixed(1)}%` : "n/a",
+              value: formatPercent(dtaRes.value),
               hint: dtaRes.status === 200 ? undefined : `HTTP ${dtaRes.status}`,
             },
             {
               label: "Equity Ratio",
-              value: eqRatioRes.value != null ? `${(eqRatioRes.value * 100).toFixed(1)}%` : "n/a",
+              value: formatPercent(eqRatioRes.value),
               hint: eqRatioRes.status === 200 ? undefined : `HTTP ${eqRatioRes.status}`,
             },
           ],
@@ -349,12 +414,12 @@ export default function AnalyticsMiniPanel() {
           items: [
             {
               label: "Asset Turnover",
-              value: atRes.value != null ? atRes.value.toFixed(2) : "n/a",
+              value: atRes.value != null ? formatRatio(atRes.value) : "n/a",
               hint: atRes.status === 200 ? undefined : `HTTP ${atRes.status}`,
             },
             {
               label: "Equity CAGR",
-              value: cagrRes.value != null ? `${(cagrRes.value * 100).toFixed(1)}%` : "n/a",
+              value: formatPercent(cagrRes.value),
               hint: cagrRes.status === 200 ? undefined : `HTTP ${cagrRes.status}`,
             },
           ],
@@ -364,17 +429,17 @@ export default function AnalyticsMiniPanel() {
           items: [
             {
               label: "EPS",
-              value: epsRes.value != null ? epsRes.value.toFixed(2) : "n/a",
+              value: epsRes.value != null ? formatPerShare(epsRes.value, price.unit) : "n/a",
               hint: epsRes.status === 200 ? undefined : `HTTP ${epsRes.status}`,
             },
             {
               label: "BVPS",
-              value: bvpsRes.value != null ? bvpsRes.value.toFixed(2) : "n/a",
+              value: bvpsRes.value != null ? formatPerShare(bvpsRes.value, price.unit) : "n/a",
               hint: bvpsRes.status === 200 ? undefined : `HTTP ${bvpsRes.status}`,
             },
             {
               label: "OEPS",
-              value: oepsRes.value != null ? oepsRes.value.toFixed(2) : "n/a",
+              value: oepsRes.value != null ? formatPerShare(oepsRes.value, price.unit) : "n/a",
               hint: oepsRes.status === 200 ? undefined : `HTTP ${oepsRes.status}`,
             },
           ],
@@ -384,12 +449,19 @@ export default function AnalyticsMiniPanel() {
           items: [
             {
               label: "FCF (abs)",
-              value: fcfAbsRes.value != null ? `${fcfAbsRes.value.toFixed(0)}` : "n/a",
+              // English: show billions/millions for readability; reuse price.unit as fallback
+              value:
+                fcfAbsRes.value != null
+                  ? `${formatCompactNumber(fcfAbsRes.value)} ${price.unit ?? "USD"}`
+                  : "n/a",
               hint: fcfAbsRes.status === 200 ? undefined : `HTTP ${fcfAbsRes.status}`,
             },
             {
               label: "Owner Earnings",
-              value: oeRes.value != null ? `${oeRes.value.toFixed(0)}` : "n/a",
+              value:
+                oeRes.value != null
+                  ? `${formatCompactNumber(oeRes.value)} ${price.unit ?? "USD"}`
+                  : "n/a",
               hint: oeRes.status === 200 ? undefined : `HTTP ${oeRes.status}`,
             },
           ],
@@ -460,61 +532,48 @@ export default function AnalyticsMiniPanel() {
 
       {err && <div style={{ fontSize: 12, color: "#f87171", marginBottom: 8 }}>{err}</div>}
 
-      {/* === Hier nur EINE äußere Grid-Box === */}
-      {loading ? (
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
-            gap: 8,
-          }}
-        >
-          <SkeletonCard label="Price" />
-          <SkeletonCard label="P/E" />
-          <SkeletonCard label="ROE" />
-          <SkeletonCard label="FCF Yield" />
-          <SkeletonCard label="Net Margin" />
-        </div>
-      ) : (
-        sections.map((sec) => (
-          <div key={sec.title} style={{ marginTop: 8 }}>
-            <div style={{ fontSize: 12, opacity: 0.8, margin: "4px 2px" }}>{sec.title}</div>
+      {/* One grid for the whole panel; each section spans all columns */}
+      <div style={GRID}>
+        {sections.map((sec) => (
+          <div key={sec.title} style={{ gridColumn: "1 / -1" }}>
+            {/* Section header */}
             <div
               style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
-                gap: 8,
+                fontSize: 10,
+                opacity: 0.7,
+                margin: "6px 2px 2px",
               }}
             >
-              {sec.items.map((m) => (
-                <div
-                  key={m.label}
-                  style={{
-                    border: "1px solid #333",
-                    borderRadius: 12,
-                    padding: 10,
-                    minHeight: 72,
-                  }}
-                >
-                  <div style={{ fontSize: 12, opacity: 0.8 }}>{m.label}</div>
-                  <div style={{ fontSize: 20, fontWeight: 700 }}>{m.value}</div>
-                  {m.hint && (
-                    <div
-                      style={{
-                        fontSize: 11,
-                        opacity: 0.7,
-                        marginTop: 2,
-                      }}
-                    >
-                      {m.hint}
+              {sec.title}
+            </div>
+
+            {/* Full-width row with as many columns as items */}
+            <div style={makeRowGrid(sec.items.length)}>
+              {loading
+                ? sec.items.map((m) => (
+                    <SkeletonCard key={`sk-${sec.title}-${m.label}`} label={m.label} />
+                  ))
+                : sec.items.map((m) => (
+                    <div key={`${sec.title}-${m.label}`} style={CARD}>
+                      <div style={{ fontSize: 10, opacity: 0.8 }}>{m.label}</div>
+                      <div
+                        style={{ fontSize: 16, fontWeight: 600 }}
+                        title={m.hint ?? undefined} // show details on hover
+                      >
+                        {m.value}
+                      </div>
+                      {/* Keep rows uniform: do not render a separate hint line for Price */}
+                      {m.hint && m.label !== "Price" && (
+                        <div style={HINT} title={m.hint}>
+                          {m.hint}
+                        </div>
+                      )}
                     </div>
-                  )}
-                </div>
-              ))}
+                  ))}
             </div>
           </div>
-        ))
-      )}
+        ))}
+      </div>
 
       {/* Price trend (sparkline) */}
       {spark.length > 0 && (

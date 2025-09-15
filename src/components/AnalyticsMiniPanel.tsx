@@ -333,9 +333,12 @@ export default function AnalyticsMiniPanel() {
                 price.value != null
                   ? `${price.value.toFixed(2)} ${price.unit ?? ""}`.trim()
                   : "n/a",
-              hint: price.asOf
-                ? `as of ${price.asOf}${price.adjusted ? " (adjusted)" : ""}`
-                : undefined,
+              hint:
+                price.status === 200
+                  ? price.asOf
+                    ? `as of ${price.asOf}${price.adjusted ? " (adjusted)" : ""}`
+                    : undefined
+                  : `HTTP ${price.status}`,
             },
             {
               label: "P/E",
@@ -563,7 +566,7 @@ export default function AnalyticsMiniPanel() {
                         {m.value}
                       </div>
                       {/* Keep rows uniform: do not render a separate hint line for Price */}
-                      {m.hint && m.label !== "Price" && (
+                      {m.hint && (
                         <div style={HINT} title={m.hint}>
                           {m.hint}
                         </div>

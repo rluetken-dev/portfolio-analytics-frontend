@@ -1,16 +1,13 @@
 // src/services/api/quotes.ts
+import type { LatestMetricWithStatus } from "../../types/analytics";
 
-export async function getLatestCloseFromQuotes(symbol: string): Promise<{
-  symbol: string;
-  value: number | null;
-  asOf?: string;
-  adjusted?: boolean;
-  source?: string;
-  unit?: string;
-}> {
-  // English comments below:
+export async function getLatestCloseFromQuotes(symbol: string): Promise<LatestMetricWithStatus> {
+  // English: normalize symbol
   const sym = (symbol ?? "").trim().toUpperCase();
-  if (!sym) return { symbol: sym, value: null };
+  if (!sym) {
+    // treat as bad request on empty symbol
+    return { symbol: sym, value: null, unit: "USD", status: 400 };
+  }
 
   try {
     // Call backend directly (bypass Vite proxy during dev)
@@ -22,14 +19,15 @@ export async function getLatestCloseFromQuotes(symbol: string): Promise<{
     });
 
     if (!resp.ok) {
-      // Non-200: return null value (UI stays stable)
-      return { symbol: sym, value: null };
+      // Surface HTTP error code to UI
+      return { symbol: sym, value: null, unit: "USD", status: resp.status };
     }
 
     const rows = (await resp.json()) as unknown;
 
     if (!Array.isArray(rows) || rows.length === 0) {
-      return { symbol: sym, value: null };
+      // No cached rows → behave like 404
+      return { symbol: sym, value: null, unit: "USD", status: 404 };
     }
 
     const r = rows[0] as {
@@ -53,9 +51,11 @@ export async function getLatestCloseFromQuotes(symbol: string): Promise<{
       adjusted: hasAdj,
       source: r.source,
       unit: "USD",
+      status: 200, // success
     };
   } catch (err) {
     console.error("[quotes] getLatestCloseFromQuotes failed:", err);
-    return { symbol: sym, value: null };
+    // Network/parse error → generic 500
+    return { symbol: sym, value: null, unit: "USD", status: 500 };
   }
 }

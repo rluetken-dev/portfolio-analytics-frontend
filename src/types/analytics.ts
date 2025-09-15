@@ -13,6 +13,11 @@ export type LatestMetric<T = number> = {
   source?: string; // e.g., "alpha_vantage"
 };
 
+// Extends LatestMetric with an optional HTTP status for error hints
+export type LatestMetricWithStatus<T = number> = LatestMetric<T> & {
+  status?: number;
+};
+
 /**
  * Shape your backend might return for /api/analytics/price.
  * We capture all possible fields defensively.

@@ -2,6 +2,8 @@
 import { useCallback, useMemo, useState, useEffect } from "react";
 import { getLatestCloseFromQuotes } from "../services/api/quotes";
 import { refreshQuotes } from "../services/api/quotes";
+import { fetchFundamentalsSnapshot, type SnapshotResult } from "../services/api/fundamentals";
+import { refreshFundamentals } from "../services/api/fundamentals";
 
 // English: live price (non-persistent) fetcher
 import { getCurrentPrice, type CurrentQuote } from "../services/api/quotes";
@@ -196,6 +198,8 @@ export default function AnalyticsMiniPanel() {
   const [live, setLive] = useState<CurrentQuote | null>(null);
   const [baseClose, setBaseClose] = useState<number | null>(null);
   const [liveBusy, setLiveBusy] = useState(false);
+  const [fundBusy, setFundBusy] = useState(false);
+  const [fundRes, setFundRes] = useState<SnapshotResult | null>(null);
 
   // English: normalized symbol for comparisons (prevents stale mismatches)
   const currentSym = useMemo(() => symbol.trim().toUpperCase(), [symbol]);
@@ -210,6 +214,10 @@ export default function AnalyticsMiniPanel() {
 
   // Centralized backend base (adjust if your backend port changes)
   const backendBase = useMemo(() => "http://localhost:5046", []);
+
+  // English: show fundamentals CTAs only when many metrics are missing
+  const manyNa =
+    sections.reduce((sum, sec) => sum + sec.items.filter((i) => i.value === "n/a").length, 0) >= 6; // tweak threshold if you like
 
   const load = useCallback(async () => {
     const sym = symbol.trim().toUpperCase();
@@ -339,6 +347,52 @@ export default function AnalyticsMiniPanel() {
         fetchMetricNumber(backendBase, "/api/analytics/fcf-margin", sym, ["value", "fcfMargin"]),
       ]);
 
+      // English: fallback via stable snapshot if analytics endpoints had no data
+      let peValue = peRes.value;
+      let peHint = peRes.status === 200 ? undefined : `HTTP ${peRes.status}`;
+
+      let netMarginValue = netMarginRes.value;
+      let netMarginHint = netMarginRes.status === 200 ? undefined : `HTTP ${netMarginRes.status}`;
+
+      if (peRes.status !== 200 || netMarginRes.status !== 200) {
+        // English: prefer already-fetched snapshot from state to avoid extra call
+        let snapshot = fundRes?.status === 200 ? fundRes.data : null;
+
+        // If not present, fetch minimal snapshot (limit=1) with robust routing
+        if (!snapshot) {
+          const snap = await fetchFundamentalsSnapshot(sym, "annual", 1);
+          if (snap.status !== 200) {
+            // English: surface the exact HTTP status to the error banner for visibility
+            setErr((prev) => prev ?? `Fundamentals snapshot fallback failed (HTTP ${snap.status})`);
+          }
+          snapshot = snap.data ?? null;
+        }
+
+        if (snapshot?.metrics) {
+          const m = snapshot.metrics as Record<string, unknown>;
+          const num = (k: string): number | null => {
+            const v = m[k];
+            return typeof v === "number" && Number.isFinite(v) ? v : null;
+          };
+
+          if (peRes.status !== 200) {
+            const peTtm = num("peRatioTTM") ?? num("peTTM") ?? num("pe");
+            if (peTtm != null) {
+              peValue = peTtm;
+              peHint = "from TTM (snapshot)";
+            }
+          }
+
+          if (netMarginRes.status !== 200) {
+            const nmTtm = num("netProfitMarginTTM") ?? num("netMarginTTM") ?? num("netMargin");
+            if (nmTtm != null) {
+              netMarginValue = nmTtm;
+              netMarginHint = "from TTM (snapshot)";
+            }
+          }
+        }
+      }
+
       // Normalize UI sections (grouped)
       const sectionsData: MetricSection[] = [
         {
@@ -359,8 +413,8 @@ export default function AnalyticsMiniPanel() {
             },
             {
               label: "P/E",
-              value: peRes.value != null ? formatRatio(peRes.value) : "n/a",
-              hint: peRes.status === 200 ? undefined : `HTTP ${peRes.status}`,
+              value: peValue != null ? formatRatio(peValue) : "n/a",
+              hint: peHint,
             },
             {
               label: "P/B",
@@ -389,8 +443,8 @@ export default function AnalyticsMiniPanel() {
             },
             {
               label: "Net Margin",
-              value: formatPercent(netMarginRes.value),
-              hint: netMarginRes.status === 200 ? undefined : `HTTP ${netMarginRes.status}`,
+              value: netMarginValue != null ? `${(netMarginValue * 100).toFixed(1)}%` : "n/a",
+              hint: netMarginHint,
             },
             {
               label: "FCF Yield",
@@ -496,7 +550,7 @@ export default function AnalyticsMiniPanel() {
     } finally {
       setLoading(false);
     }
-  }, [symbol, backendBase]);
+  }, [backendBase, symbol, fundRes]);
 
   return (
     <div
@@ -637,6 +691,99 @@ export default function AnalyticsMiniPanel() {
         </div>
       )}
 
+      {/* English: show CTA if any metric is "n/a" (likely fundamentals missing) */}
+      {manyNa && (
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <button
+            onClick={async () => {
+              try {
+                setFundBusy(true);
+                setErr(null);
+                setFundRes(null);
+
+                // English: get last 5 annual rows (income/balance/cash + TTM metrics)
+                const res = await fetchFundamentalsSnapshot(currentSym, "annual", 5);
+                setFundRes(res);
+                console.log("[fundamentals snapshot]", res); // English: inspect payload in DevTools
+
+                // NOTE: This does NOT persist. Analytics won't change yet.
+                // Next step: add a small POST /api/fundamentals/refresh to persist.
+              } catch (e) {
+                console.error("[panel] fundamentals snapshot failed:", e);
+                setErr("Could not fetch fundamentals snapshot.");
+              } finally {
+                setFundBusy(false);
+              }
+            }}
+            disabled={loading || fundBusy}
+            style={{
+              padding: "6px 10px",
+              borderRadius: 8,
+              border: "1px solid #333",
+              background: "transparent",
+              cursor: loading || fundBusy ? "default" : "pointer",
+              fontSize: 12,
+              opacity: loading || fundBusy ? 0.7 : 1,
+            }}
+            title={`Fetch fundamentals snapshot (not persisted) for ${currentSym}`}
+          >
+            {fundBusy ? "Fetching…" : "Get fundamentals (5y)"}
+          </button>
+
+          {/* English: tiny inline status preview to avoid layout shift */}
+          {fundRes && (
+            <span style={{ fontSize: 12, opacity: 0.7 }}>
+              fundamentals: HTTP {fundRes.status}
+              {fundRes.data ? " — snapshot received" : " — no data"}
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* English: persist fundamentals into DB (annual, last 5y) and reload */}
+      {manyNa && (
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <button
+            onClick={async () => {
+              try {
+                setFundBusy(true); // reuse your fundBusy flag
+                setErr(null);
+
+                const res = await refreshFundamentals(currentSym, "annual", 5);
+                console.log("[fundamentals refresh]", res); // debug counters
+
+                // English: after persist, reload panel so analytics can pick up DB data
+                await load();
+              } catch (e) {
+                console.error("[panel] fundamentals refresh failed:", e);
+                setErr(
+                  e instanceof Error ? e.message : "Could not persist fundamentals (refresh).",
+                );
+              } finally {
+                setFundBusy(false);
+              }
+            }}
+            disabled={loading || fundBusy}
+            style={{
+              padding: "6px 10px",
+              borderRadius: 8,
+              border: "1px solid #333",
+              background: "transparent",
+              cursor: loading || fundBusy ? "default" : "pointer",
+              fontSize: 12,
+              opacity: loading || fundBusy ? 0.7 : 1,
+            }}
+            title={`Persist fundamentals (annual, 5y) for ${currentSym}`}
+          >
+            {fundBusy ? "Persisting…" : "Save fundamentals (5y annual)"}
+          </button>
+
+          <span style={{ fontSize: 12, opacity: 0.7 }}>
+            Stores income/balance/cash in DB, then reloads.
+          </span>
+        </div>
+      )}
+
       {err && <div style={{ fontSize: 12, color: "#f87171", marginBottom: 8 }}>{err}</div>}
 
       {/* One grid for the whole panel; each section spans all columns */}
@@ -675,7 +822,6 @@ export default function AnalyticsMiniPanel() {
               </span>
             </div>
 
-            {/* Full-width row with as many columns as items */}
             {/* Full-width row with as many columns as items */}
             <div style={makeRowGrid(sec.items.length)}>
               {loading

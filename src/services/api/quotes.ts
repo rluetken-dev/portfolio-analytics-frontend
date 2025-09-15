@@ -87,3 +87,42 @@ export async function refreshQuotes(symbols: string, range = "24m"): Promise<Ref
 
   return (await resp.json()) as RefreshResponse;
 }
+
+// English: fetch the most recent live price (does NOT persist to DB)
+export type CurrentQuote = {
+  symbol: string;
+  price: number | null;
+  latestTradingDay?: string;
+  status: number;
+};
+
+export async function getCurrentPrice(symbol: string): Promise<CurrentQuote> {
+  const sym = (symbol ?? "").trim().toUpperCase();
+  if (!sym) return { symbol: sym, price: null, status: 400 };
+
+  try {
+    const url = `http://localhost:5046/api/quotes/current?symbol=${encodeURIComponent(sym)}`;
+    const resp = await fetch(url, { headers: { Accept: "application/json" } });
+
+    if (!resp.ok) {
+      // English: surface HTTP code for UI hinting
+      return { symbol: sym, price: null, status: resp.status };
+    }
+
+    const data = (await resp.json()) as {
+      symbol?: string;
+      price?: number;
+      latestTradingDay?: string;
+    };
+
+    return {
+      symbol: data.symbol ?? sym,
+      price: typeof data.price === "number" ? data.price : null,
+      latestTradingDay: data.latestTradingDay,
+      status: 200,
+    };
+  } catch {
+    // English: network/parse error
+    return { symbol: sym, price: null, status: 500 };
+  }
+}

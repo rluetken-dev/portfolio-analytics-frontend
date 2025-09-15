@@ -3,6 +3,9 @@ import { useCallback, useMemo, useState, useEffect } from "react";
 import { getLatestCloseFromQuotes } from "../services/api/quotes";
 import { refreshQuotes } from "../services/api/quotes";
 
+// English: live price (non-persistent) fetcher
+import { getCurrentPrice, type CurrentQuote } from "../services/api/quotes";
+
 /**
  * Very small self-contained panel to show two metrics for a symbol:
  * - Latest price (via QuotesController: /api/quotes/latest?take=1)
@@ -190,6 +193,12 @@ export default function AnalyticsMiniPanel() {
   const [sections, setSections] = useState<MetricSection[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [spark, setSpark] = useState<TimeseriesPoint[]>([]);
+  const [live, setLive] = useState<CurrentQuote | null>(null);
+  const [baseClose, setBaseClose] = useState<number | null>(null);
+  const [liveBusy, setLiveBusy] = useState(false);
+
+  // English: normalized symbol for comparisons (prevents stale mismatches)
+  const currentSym = useMemo(() => symbol.trim().toUpperCase(), [symbol]);
 
   // load last symbol from localStorage on mount
   useEffect(() => {
@@ -210,9 +219,16 @@ export default function AnalyticsMiniPanel() {
     setLoading(true);
     setErr(null);
 
+    // English: reset live delta when starting a fresh load
+    setLive(null);
+    setBaseClose(null);
+
     try {
       // 1) Latest price (already) …
       const price = await getLatestCloseFromQuotes(sym);
+
+      // English: store base close for later live delta calculation
+      setBaseClose(price.value ?? null);
 
       // 1b) Load timeseries (last 180 days) for sparkline
       const to = new Date();
@@ -576,6 +592,51 @@ export default function AnalyticsMiniPanel() {
           </div>
         )}
 
+      {/* English: show live button when a section is rendered; keep it visible during fetch */}
+      {sections.length > 0 && (
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <button
+            onClick={async () => {
+              try {
+                setLiveBusy(true); // start local busy (no global loading)
+                setErr(null);
+                const startSym = currentSym; // English: capture symbol at click time
+                const q = await getCurrentPrice(startSym);
+                // English: apply only if user didn't change symbol mid-flight
+                if (startSym === currentSym) setLive(q);
+              } catch (e) {
+                console.error("[panel] live price failed:", e);
+                setErr("Could not fetch live price.");
+              } finally {
+                setLiveBusy(false); // end local busy
+              }
+            }}
+            disabled={loading || liveBusy}
+            style={{
+              padding: "6px 10px",
+              borderRadius: 8,
+              border: "1px solid #333",
+              background: "transparent",
+              cursor: loading || liveBusy ? "default" : "pointer",
+              fontSize: 12,
+              opacity: loading || liveBusy ? 0.7 : 1, // English: subtle disabled look
+            }}
+            title={`Fetch live price for ${currentSym}`}
+          >
+            {liveBusy ? "Fetching…" : "Get live price"}
+          </button>
+
+          {/* English: show live price with currency and its date appended */}
+          {live && live.symbol?.toUpperCase() === currentSym && (
+            <span style={{ fontSize: 12, opacity: 0.7 }}>
+              live ({live.symbol}): {live.price != null ? `${live.price.toFixed(2)} USD` : "n/a"}
+              {live.latestTradingDay ? ` — ${live.latestTradingDay}` : ""}
+              {` (HTTP ${live.status})`}
+            </span>
+          )}
+        </div>
+      )}
+
       {err && <div style={{ fontSize: 12, color: "#f87171", marginBottom: 8 }}>{err}</div>}
 
       {/* One grid for the whole panel; each section spans all columns */}
@@ -585,14 +646,36 @@ export default function AnalyticsMiniPanel() {
             {/* Section header */}
             <div
               style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
                 fontSize: 10,
-                opacity: 0.7,
+                opacity: 0.8,
                 margin: "6px 2px 2px",
               }}
             >
-              {sec.title}
+              <span>{sec.title}</span>
+              <span
+                title="Available metrics in this section"
+                style={{
+                  border: "1px solid #333",
+                  borderRadius: 6,
+                  padding: "1px 6px",
+                  fontSize: 10,
+                  opacity: 0.75,
+                }}
+              >
+                {
+                  // English: count metrics that are not "n/a"
+                  (() => {
+                    const available = sec.items.filter((i) => i.value !== "n/a").length;
+                    return `${available}/${sec.items.length}`;
+                  })()
+                }
+              </span>
             </div>
 
+            {/* Full-width row with as many columns as items */}
             {/* Full-width row with as many columns as items */}
             <div style={makeRowGrid(sec.items.length)}>
               {loading
@@ -602,13 +685,44 @@ export default function AnalyticsMiniPanel() {
                 : sec.items.map((m) => (
                     <div key={`${sec.title}-${m.label}`} style={CARD}>
                       <div style={{ fontSize: 10, opacity: 0.8 }}>{m.label}</div>
+
+                      {/* Value + optional live delta badge (only for Price) */}
                       <div
-                        style={{ fontSize: 16, fontWeight: 600 }}
-                        title={m.hint ?? undefined} // show details on hover
+                        // English: keep value and delta on one line, align baselines
+                        style={{
+                          fontSize: 16,
+                          fontWeight: 600,
+                          display: "flex",
+                          alignItems: "baseline",
+                          gap: 6,
+                        }}
+                        title={m.hint ?? undefined}
                       >
-                        {m.value}
+                        <span>{m.value}</span>
+
+                        {m.label === "Price" &&
+                          live?.status === 200 &&
+                          typeof live.price === "number" &&
+                          typeof baseClose === "number" &&
+                          baseClose > 0 && (
+                            <span
+                              // English: delta vs last cached close (color up/down)
+                              title={`Live vs last close: ${live.price - baseClose >= 0 ? "+" : ""}${(live.price - baseClose).toFixed(2)}`}
+                              style={{
+                                fontSize: 12,
+                                border: "1px solid #333",
+                                borderRadius: 6,
+                                padding: "0 6px",
+                                color: live.price - baseClose >= 0 ? "#22c55e" : "#f87171",
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              {(((live.price - baseClose) / baseClose) * 100).toFixed(2)}%
+                            </span>
+                          )}
                       </div>
-                      {/* Keep rows uniform: do not render a separate hint line for Price */}
+
+                      {/* Hint row (keeps rows uniform; shows date or HTTP status) */}
                       {m.hint && (
                         <div style={HINT} title={m.hint}>
                           {m.hint}

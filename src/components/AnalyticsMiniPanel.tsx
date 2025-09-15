@@ -17,6 +17,11 @@ type Metric = {
   hint?: string;
 };
 
+type MetricSection = {
+  title: string;
+  items: Metric[];
+};
+
 // Price timeseries point
 type TimeseriesPoint = { date: string; close: number };
 
@@ -114,7 +119,7 @@ async function fetchMetricNumber(
 export default function AnalyticsMiniPanel() {
   const [symbol, setSymbol] = useState("AAPL");
   const [loading, setLoading] = useState(false);
-  const [metrics, setMetrics] = useState<Metric[]>([]);
+  const [sections, setSections] = useState<MetricSection[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [spark, setSpark] = useState<TimeseriesPoint[]>([]);
 
@@ -250,131 +255,152 @@ export default function AnalyticsMiniPanel() {
         fetchMetricNumber(backendBase, "/api/analytics/fcf-margin", sym, ["value", "fcfMargin"]),
       ]);
 
-      // Normalize UI metrics
-      const list: Metric[] = [
-        // --- Price (special case, from quotes service) ---
+      // Normalize UI sections (grouped)
+      const sectionsData: MetricSection[] = [
         {
-          label: "Price",
-          value:
-            price.value != null ? `${price.value.toFixed(2)} ${price.unit ?? ""}`.trim() : "n/a",
-          hint: price.asOf
-            ? `as of ${price.asOf}${price.adjusted ? " (adjusted)" : ""}`
-            : undefined,
-        },
-
-        // --- Valuation ---
-        {
-          label: "P/E",
-          value: peRes.value != null ? peRes.value.toFixed(2) : "n/a",
-          hint: peRes.status === 200 ? undefined : `HTTP ${peRes.status}`,
-        },
-        {
-          label: "P/B",
-          value: pbRes.value != null ? pbRes.value.toFixed(2) : "n/a",
-          hint: pbRes.status === 200 ? undefined : `HTTP ${pbRes.status}`,
-        },
-        {
-          label: "P/OE",
-          value: pToOeRes.value != null ? pToOeRes.value.toFixed(2) : "n/a",
-          hint: pToOeRes.status === 200 ? undefined : `HTTP ${pToOeRes.status}`,
-        },
-
-        // --- Profitability ---
-        {
-          label: "ROE",
-          value: roeRes.value != null ? `${(roeRes.value * 100).toFixed(1)}%` : "n/a",
-          hint: roeRes.status === 200 ? undefined : `HTTP ${roeRes.status}`,
+          title: "Valuation",
+          items: [
+            {
+              label: "Price",
+              value:
+                price.value != null
+                  ? `${price.value.toFixed(2)} ${price.unit ?? ""}`.trim()
+                  : "n/a",
+              hint: price.asOf
+                ? `as of ${price.asOf}${price.adjusted ? " (adjusted)" : ""}`
+                : undefined,
+            },
+            {
+              label: "P/E",
+              value: peRes.value != null ? peRes.value.toFixed(2) : "n/a",
+              hint: peRes.status === 200 ? undefined : `HTTP ${peRes.status}`,
+            },
+            {
+              label: "P/B",
+              value: pbRes.value != null ? pbRes.value.toFixed(2) : "n/a",
+              hint: pbRes.status === 200 ? undefined : `HTTP ${pbRes.status}`,
+            },
+            {
+              label: "P/OE",
+              value: pToOeRes.value != null ? pToOeRes.value.toFixed(2) : "n/a",
+              hint: pToOeRes.status === 200 ? undefined : `HTTP ${pToOeRes.status}`,
+            },
+          ],
         },
         {
-          label: "ROA",
-          value: roaRes.value != null ? `${(roaRes.value * 100).toFixed(1)}%` : "n/a",
-          hint: roaRes.status === 200 ? undefined : `HTTP ${roaRes.status}`,
+          title: "Profitability",
+          items: [
+            {
+              label: "ROE",
+              value: roeRes.value != null ? `${(roeRes.value * 100).toFixed(1)}%` : "n/a",
+              hint: roeRes.status === 200 ? undefined : `HTTP ${roeRes.status}`,
+            },
+            {
+              label: "ROA",
+              value: roaRes.value != null ? `${(roaRes.value * 100).toFixed(1)}%` : "n/a",
+              hint: roaRes.status === 200 ? undefined : `HTTP ${roaRes.status}`,
+            },
+            {
+              label: "Net Margin",
+              value:
+                netMarginRes.value != null ? `${(netMarginRes.value * 100).toFixed(1)}%` : "n/a",
+              hint: netMarginRes.status === 200 ? undefined : `HTTP ${netMarginRes.status}`,
+            },
+            {
+              label: "FCF Yield",
+              value: fcfYieldRes.value != null ? `${(fcfYieldRes.value * 100).toFixed(1)}%` : "n/a",
+              hint: fcfYieldRes.status === 200 ? undefined : `HTTP ${fcfYieldRes.status}`,
+            },
+            {
+              label: "FCF Margin",
+              value:
+                fcfMarginRes.value != null ? `${(fcfMarginRes.value * 100).toFixed(1)}%` : "n/a",
+              hint: fcfMarginRes.status === 200 ? undefined : `HTTP ${fcfMarginRes.status}`,
+            },
+            {
+              label: "OE Yield",
+              value: oeYieldRes.value != null ? `${(oeYieldRes.value * 100).toFixed(1)}%` : "n/a",
+              hint: oeYieldRes.status === 200 ? undefined : `HTTP ${oeYieldRes.status}`,
+            },
+          ],
         },
         {
-          label: "Net Margin",
-          value: netMarginRes.value != null ? `${(netMarginRes.value * 100).toFixed(1)}%` : "n/a",
-          hint: netMarginRes.status === 200 ? undefined : `HTTP ${netMarginRes.status}`,
+          title: "Solvency / Leverage",
+          items: [
+            {
+              label: "Debt/Equity",
+              value: dteRes.value != null ? dteRes.value.toFixed(2) : "n/a",
+              hint: dteRes.status === 200 ? undefined : `HTTP ${dteRes.status}`,
+            },
+            {
+              label: "Debt/Assets",
+              value: dtaRes.value != null ? `${(dtaRes.value * 100).toFixed(1)}%` : "n/a",
+              hint: dtaRes.status === 200 ? undefined : `HTTP ${dtaRes.status}`,
+            },
+            {
+              label: "Equity Ratio",
+              value: eqRatioRes.value != null ? `${(eqRatioRes.value * 100).toFixed(1)}%` : "n/a",
+              hint: eqRatioRes.status === 200 ? undefined : `HTTP ${eqRatioRes.status}`,
+            },
+          ],
         },
         {
-          label: "FCF Yield",
-          value: fcfYieldRes.value != null ? `${(fcfYieldRes.value * 100).toFixed(1)}%` : "n/a",
-          hint: fcfYieldRes.status === 200 ? undefined : `HTTP ${fcfYieldRes.status}`,
+          title: "Efficiency & Growth",
+          items: [
+            {
+              label: "Asset Turnover",
+              value: atRes.value != null ? atRes.value.toFixed(2) : "n/a",
+              hint: atRes.status === 200 ? undefined : `HTTP ${atRes.status}`,
+            },
+            {
+              label: "Equity CAGR",
+              value: cagrRes.value != null ? `${(cagrRes.value * 100).toFixed(1)}%` : "n/a",
+              hint: cagrRes.status === 200 ? undefined : `HTTP ${cagrRes.status}`,
+            },
+          ],
         },
         {
-          label: "OE Yield",
-          value: oeYieldRes.value != null ? `${(oeYieldRes.value * 100).toFixed(1)}%` : "n/a",
-          hint: oeYieldRes.status === 200 ? undefined : `HTTP ${oeYieldRes.status}`,
+          title: "Per Share",
+          items: [
+            {
+              label: "EPS",
+              value: epsRes.value != null ? epsRes.value.toFixed(2) : "n/a",
+              hint: epsRes.status === 200 ? undefined : `HTTP ${epsRes.status}`,
+            },
+            {
+              label: "BVPS",
+              value: bvpsRes.value != null ? bvpsRes.value.toFixed(2) : "n/a",
+              hint: bvpsRes.status === 200 ? undefined : `HTTP ${bvpsRes.status}`,
+            },
+            {
+              label: "OEPS",
+              value: oepsRes.value != null ? oepsRes.value.toFixed(2) : "n/a",
+              hint: oepsRes.status === 200 ? undefined : `HTTP ${oepsRes.status}`,
+            },
+          ],
         },
         {
-          label: "FCF Margin",
-          // English: assume backend returns decimal (e.g., 0.18 -> 18.0%)
-          value: fcfMarginRes.value != null ? `${(fcfMarginRes.value * 100).toFixed(1)}%` : "n/a",
-          hint: fcfMarginRes.status === 200 ? undefined : `HTTP ${fcfMarginRes.status}`,
-        },
-
-        // --- Efficiency / Growth ---
-        {
-          label: "Asset Turnover",
-          value: atRes.value != null ? atRes.value.toFixed(2) : "n/a",
-          hint: atRes.status === 200 ? undefined : `HTTP ${atRes.status}`,
-        },
-        {
-          label: "Equity CAGR",
-          value: cagrRes.value != null ? `${(cagrRes.value * 100).toFixed(1)}%` : "n/a",
-          hint: cagrRes.status === 200 ? undefined : `HTTP ${cagrRes.status}`,
-        },
-
-        // --- Solvency / Leverage ---
-        {
-          label: "Debt/Equity",
-          value: dteRes.value != null ? dteRes.value.toFixed(2) : "n/a",
-          hint: dteRes.status === 200 ? undefined : `HTTP ${dteRes.status}`,
-        },
-        {
-          label: "Equity Ratio",
-          value: eqRatioRes.value != null ? `${(eqRatioRes.value * 100).toFixed(1)}%` : "n/a",
-          hint: eqRatioRes.status === 200 ? undefined : `HTTP ${eqRatioRes.status}`,
-        },
-        {
-          label: "Debt/Assets",
-          value: dtaRes.value != null ? `${(dtaRes.value * 100).toFixed(1)}%` : "n/a",
-          hint: dtaRes.status === 200 ? undefined : `HTTP ${dtaRes.status}`,
-        },
-
-        // --- Per-Share Metrics ---
-        {
-          label: "EPS",
-          value: epsRes.value != null ? epsRes.value.toFixed(2) : "n/a",
-          hint: epsRes.status === 200 ? undefined : `HTTP ${epsRes.status}`,
-        },
-        {
-          label: "BVPS",
-          value: bvpsRes.value != null ? bvpsRes.value.toFixed(2) : "n/a",
-          hint: bvpsRes.status === 200 ? undefined : `HTTP ${bvpsRes.status}`,
-        },
-        {
-          label: "OEPS",
-          value: oepsRes.value != null ? oepsRes.value.toFixed(2) : "n/a",
-          hint: oepsRes.status === 200 ? undefined : `HTTP ${oepsRes.status}`,
-        },
-
-        // --- Cash Flow / Owner Earnings ---
-        {
-          label: "FCF (abs)",
-          value: fcfAbsRes.value != null ? `${fcfAbsRes.value.toFixed(0)}` : "n/a",
-          hint: fcfAbsRes.status === 200 ? undefined : `HTTP ${fcfAbsRes.status}`,
-        },
-        {
-          label: "Owner Earnings",
-          value: oeRes.value != null ? `${oeRes.value.toFixed(0)}` : "n/a",
-          hint: oeRes.status === 200 ? undefined : `HTTP ${oeRes.status}`,
+          title: "Cash Flow & Owner Earnings",
+          items: [
+            {
+              label: "FCF (abs)",
+              value: fcfAbsRes.value != null ? `${fcfAbsRes.value.toFixed(0)}` : "n/a",
+              hint: fcfAbsRes.status === 200 ? undefined : `HTTP ${fcfAbsRes.status}`,
+            },
+            {
+              label: "Owner Earnings",
+              value: oeRes.value != null ? `${oeRes.value.toFixed(0)}` : "n/a",
+              hint: oeRes.status === 200 ? undefined : `HTTP ${oeRes.status}`,
+            },
+          ],
         },
       ];
-      setMetrics(list);
+
+      setSections(sectionsData);
     } catch (e: unknown) {
       console.error("[panel] load failed:", e);
       setErr("Fehler beim Laden der Kennzahlen.");
-      setMetrics([]);
+      setSections([]); // clear sections on error
     } finally {
       setLoading(false);
     }
@@ -395,6 +421,7 @@ export default function AnalyticsMiniPanel() {
     >
       <div style={{ fontWeight: 600 }}>Analytics (mini)</div>
 
+      {/* Input + Button */}
       <div style={{ display: "flex", gap: 8 }}>
         <input
           value={symbol}
@@ -433,39 +460,61 @@ export default function AnalyticsMiniPanel() {
 
       {err && <div style={{ fontSize: 12, color: "#f87171", marginBottom: 8 }}>{err}</div>}
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
-          gap: 8,
-        }}
-      >
-        {loading ? (
-          <>
-            <SkeletonCard label="Price" />
-            <SkeletonCard label="P/E" />
-            <SkeletonCard label="ROE" />
-            <SkeletonCard label="FCF Yield" />
-            <SkeletonCard label="Net Margin" />
-          </>
-        ) : (
-          metrics.map((m) => (
+      {/* === Hier nur EINE äußere Grid-Box === */}
+      {loading ? (
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
+            gap: 8,
+          }}
+        >
+          <SkeletonCard label="Price" />
+          <SkeletonCard label="P/E" />
+          <SkeletonCard label="ROE" />
+          <SkeletonCard label="FCF Yield" />
+          <SkeletonCard label="Net Margin" />
+        </div>
+      ) : (
+        sections.map((sec) => (
+          <div key={sec.title} style={{ marginTop: 8 }}>
+            <div style={{ fontSize: 12, opacity: 0.8, margin: "4px 2px" }}>{sec.title}</div>
             <div
-              key={m.label}
               style={{
-                border: "1px solid #333",
-                borderRadius: 12,
-                padding: 10,
-                minHeight: 72,
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
+                gap: 8,
               }}
             >
-              <div style={{ fontSize: 12, opacity: 0.8 }}>{m.label}</div>
-              <div style={{ fontSize: 20, fontWeight: 700 }}>{m.value}</div>
-              {m.hint && <div style={{ fontSize: 11, opacity: 0.7, marginTop: 2 }}>{m.hint}</div>}
+              {sec.items.map((m) => (
+                <div
+                  key={m.label}
+                  style={{
+                    border: "1px solid #333",
+                    borderRadius: 12,
+                    padding: 10,
+                    minHeight: 72,
+                  }}
+                >
+                  <div style={{ fontSize: 12, opacity: 0.8 }}>{m.label}</div>
+                  <div style={{ fontSize: 20, fontWeight: 700 }}>{m.value}</div>
+                  {m.hint && (
+                    <div
+                      style={{
+                        fontSize: 11,
+                        opacity: 0.7,
+                        marginTop: 2,
+                      }}
+                    >
+                      {m.hint}
+                    </div>
+                  )}
+                </div>
+              ))}
             </div>
-          ))
-        )}
-      </div>
+          </div>
+        ))
+      )}
 
       {/* Price trend (sparkline) */}
       {spark.length > 0 && (

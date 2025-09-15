@@ -17,6 +17,9 @@ type Metric = {
   hint?: string;
 };
 
+// Price timeseries point
+type TimeseriesPoint = { date: string; close: number };
+
 // persist the last used symbol (dev-friendly)
 const STORAGE_KEY = "analytics:lastSymbol";
 
@@ -55,11 +58,65 @@ function SkeletonCard({ label }: { label: string }) {
   );
 }
 
+// Format Date -> "YYYY-MM-DD"
+function fmt(d: Date) {
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}-${mm}-${dd}`;
+}
+
+// Build SVG polyline points string from timeseries
+function buildPolyline(pts: TimeseriesPoint[], w: number, h: number): string {
+  if (pts.length === 0) return "";
+  const ys = pts.map((p) => p.close);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  const spanY = maxY - minY || 1;
+  const stepX = pts.length > 1 ? w / (pts.length - 1) : 0;
+
+  return pts
+    .map((p, i) => {
+      const x = Math.round(i * stepX);
+      // invert y for SVG (0 at top)
+      const y = Math.round(h - ((p.close - minY) / spanY) * h);
+      return `${x},${y}`;
+    })
+    .join(" ");
+}
+
+/**
+ * Tiny helper to fetch a numeric metric from /api/analytics/*.
+ * Accepts multiple candidate keys (e.g., ["value","roe"]) for flexible mapping.
+ */
+async function fetchMetricNumber(
+  baseUrl: string,
+  path: string,
+  symbol: string,
+  candidateKeys: string[],
+): Promise<{ value: number | null; status: number }> {
+  const resp = await fetch(`${baseUrl}${path}?symbol=${encodeURIComponent(symbol)}`, {
+    headers: { Accept: "application/json" },
+  });
+  if (!resp.ok) {
+    return { value: null, status: resp.status };
+  }
+  const raw = (await resp.json()) as unknown;
+  if (typeof raw === "number") return { value: raw, status: resp.status };
+  if (raw && typeof raw === "object") {
+    const o = raw as Record<string, unknown>;
+    for (const k of candidateKeys) {
+      if (typeof o[k] === "number") return { value: o[k] as number, status: resp.status };
+    }
+  }
+  return { value: null, status: resp.status };
+}
+
 export default function AnalyticsMiniPanel() {
   const [symbol, setSymbol] = useState("AAPL");
   const [loading, setLoading] = useState(false);
   const [metrics, setMetrics] = useState<Metric[]>([]);
   const [err, setErr] = useState<string | null>(null);
+  const [spark, setSpark] = useState<TimeseriesPoint[]>([]);
 
   // load last symbol from localStorage on mount
   useEffect(() => {
@@ -81,85 +138,121 @@ export default function AnalyticsMiniPanel() {
     setErr(null);
 
     try {
-      // 1) Latest price via our quotes service (already bypasses proxy)
+      // 1) Latest price (already) …
       const price = await getLatestCloseFromQuotes(sym);
 
-      // 2) Latest P/E via analytics endpoint (direct native fetch, no proxy)
-      //    Expected shape: number OR { value?: number } OR { pe?: number }
-      const peResp = await fetch(
-        `${backendBase}/api/analytics/pe?symbol=${encodeURIComponent(sym)}`,
-        { headers: { Accept: "application/json" } },
-      );
+      // 1b) Load timeseries (last 180 days) for sparkline
+      const to = new Date();
+      const from = new Date();
+      from.setDate(to.getDate() - 180);
 
-      let peValue: number | null = null;
-      if (peResp.ok) {
-        const raw = (await peResp.json()) as unknown;
-        if (typeof raw === "number") peValue = raw;
-        else if (raw && typeof raw === "object") {
-          const o = raw as Record<string, unknown>;
-          // Accept common shapes
-          if (typeof o.value === "number") peValue = o.value;
-          else if (typeof o.pe === "number") peValue = o.pe;
-          // (add more keys if your backend uses a different naming)
+      try {
+        const tsResp = await fetch(
+          `${backendBase}/api/quotes/timeseries?symbol=${encodeURIComponent(sym)}&from=${fmt(
+            from,
+          )}&to=${fmt(to)}`,
+          { headers: { Accept: "application/json" } },
+        );
+
+        if (tsResp.ok) {
+          const raw = (await tsResp.json()) as unknown;
+          const arr = Array.isArray(raw) ? raw : [];
+          // Defensive parse
+          const pts: TimeseriesPoint[] = arr
+            .map((r: unknown) => {
+              if (typeof r === "object" && r !== null) {
+                const obj = r as Record<string, unknown>;
+                return {
+                  date: String(obj.date ?? ""),
+                  close: typeof obj.close === "number" ? obj.close : NaN,
+                };
+              }
+              return { date: "", close: NaN };
+            })
+            .filter((p) => Number.isFinite(p.close));
+
+          // Ensure chronological
+          pts.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+          setSpark(pts);
+        } else {
+          setSpark([]);
         }
+      } catch {
+        setSpark([]);
       }
 
-      // 3) Latest ROE via analytics endpoint (direct native fetch, no proxy)
-      //    Expected shapes: number OR { value?: number } OR { roe?: number }
-      const roeResp = await fetch(
-        `${backendBase}/api/analytics/roe?symbol=${encodeURIComponent(sym)}`,
-        { headers: { Accept: "application/json" } },
-      );
-
-      let roeValue: number | null = null;
-      if (roeResp.ok) {
-        const raw = (await roeResp.json()) as unknown;
-        if (typeof raw === "number") roeValue = raw;
-        else if (raw && typeof raw === "object") {
-          const o = raw as Record<string, unknown>;
-          if (typeof o.value === "number") roeValue = o.value;
-          else if (typeof o.roe === "number") roeValue = o.roe;
-        }
-      }
-
-      // 4) Latest FCF Yield via analytics endpoint (direct native fetch)
-      //    Expected shapes: number OR { value?: number } OR { fcfYield?: number }
-      const fcfYieldResp = await fetch(
-        `${backendBase}/api/analytics/fcf-yield?symbol=${encodeURIComponent(sym)}`,
-        { headers: { Accept: "application/json" } },
-      );
-
-      let fcfYieldValue: number | null = null;
-      if (fcfYieldResp.ok) {
-        const raw = (await fcfYieldResp.json()) as unknown;
-        if (typeof raw === "number") fcfYieldValue = raw;
-        else if (raw && typeof raw === "object") {
-          const o = raw as Record<string, unknown>;
-          if (typeof o.value === "number") fcfYieldValue = o.value;
-          else if (typeof o.fcfYield === "number") fcfYieldValue = o.fcfYield;
-        }
-      }
-
-      // 5) Latest Net Margin via analytics endpoint (direct native fetch)
-      //    Expected shapes: number OR { value?: number } OR { netMargin?: number }
-      const netMarginResp = await fetch(
-        `${backendBase}/api/analytics/net-margin?symbol=${encodeURIComponent(sym)}`,
-        { headers: { Accept: "application/json" } },
-      );
-
-      let netMarginValue: number | null = null;
-      if (netMarginResp.ok) {
-        const raw = (await netMarginResp.json()) as unknown;
-        if (typeof raw === "number") netMarginValue = raw;
-        else if (raw && typeof raw === "object") {
-          const o = raw as Record<string, unknown>;
-          if (typeof o.value === "number") netMarginValue = o.value;
-          else if (typeof o.netMargin === "number") netMarginValue = o.netMargin;
-        }
-      }
+      // 2) Fetch all other analytics metrics in parallel
+      const [
+        peRes,
+        roeRes,
+        fcfYieldRes,
+        netMarginRes,
+        dteRes,
+        eqRatioRes,
+        roaRes,
+        dtaRes,
+        epsRes,
+        bvpsRes,
+        pbRes,
+        atRes,
+        cagrRes,
+        fcfAbsRes,
+        oeRes,
+        oeYieldRes,
+        oepsRes,
+        pToOeRes,
+        fcfMarginRes,
+      ] = await Promise.all([
+        fetchMetricNumber(backendBase, "/api/analytics/pe", sym, ["value", "pe"]),
+        fetchMetricNumber(backendBase, "/api/analytics/roe", sym, ["value", "roe"]),
+        fetchMetricNumber(backendBase, "/api/analytics/fcf-yield", sym, ["value", "fcfYield"]),
+        fetchMetricNumber(backendBase, "/api/analytics/net-margin", sym, ["value", "netMargin"]),
+        fetchMetricNumber(backendBase, "/api/analytics/debt-to-equity", sym, [
+          "value",
+          "debtToEquity",
+        ]),
+        fetchMetricNumber(backendBase, "/api/analytics/equity-ratio", sym, [
+          "value",
+          "equityRatio",
+        ]),
+        fetchMetricNumber(backendBase, "/api/analytics/roa", sym, ["value", "roa"]),
+        fetchMetricNumber(backendBase, "/api/analytics/debt-to-assets", sym, [
+          "value",
+          "debtToAssets",
+        ]),
+        fetchMetricNumber(backendBase, "/api/analytics/eps", sym, ["value", "eps"]),
+        fetchMetricNumber(backendBase, "/api/analytics/bvps", sym, ["value", "bvps"]),
+        fetchMetricNumber(backendBase, "/api/analytics/pb", sym, ["value", "pb"]),
+        fetchMetricNumber(backendBase, "/api/analytics/asset-turnover", sym, [
+          "value",
+          "assetTurnover",
+        ]),
+        fetchMetricNumber(backendBase, "/api/analytics/equity-cagr", sym, [
+          "value",
+          "cagr",
+          "equityCagr",
+        ]),
+        fetchMetricNumber(backendBase, "/api/analytics/fcf", sym, ["value", "fcf"]),
+        fetchMetricNumber(backendBase, "/api/analytics/owner-earnings", sym, [
+          "value",
+          "ownerEarnings",
+        ]),
+        fetchMetricNumber(backendBase, "/api/analytics/owner-earnings-yield", sym, [
+          "value",
+          "ownerEarningsYield",
+        ]),
+        fetchMetricNumber(backendBase, "/api/analytics/oeps", sym, ["value", "oeps"]),
+        fetchMetricNumber(backendBase, "/api/analytics/p-to-oe", sym, [
+          "value",
+          "pToOe",
+          "pOverOe",
+        ]),
+        fetchMetricNumber(backendBase, "/api/analytics/fcf-margin", sym, ["value", "fcfMargin"]),
+      ]);
 
       // Normalize UI metrics
       const list: Metric[] = [
+        // --- Price (special case, from quotes service) ---
         {
           label: "Price",
           value:
@@ -168,31 +261,115 @@ export default function AnalyticsMiniPanel() {
             ? `as of ${price.asOf}${price.adjusted ? " (adjusted)" : ""}`
             : undefined,
         },
+
+        // --- Valuation ---
         {
           label: "P/E",
-          value: peValue != null ? peValue.toFixed(2) : "n/a",
-          hint: peResp.ok ? undefined : `HTTP ${peResp.status}`,
+          value: peRes.value != null ? peRes.value.toFixed(2) : "n/a",
+          hint: peRes.status === 200 ? undefined : `HTTP ${peRes.status}`,
         },
+        {
+          label: "P/B",
+          value: pbRes.value != null ? pbRes.value.toFixed(2) : "n/a",
+          hint: pbRes.status === 200 ? undefined : `HTTP ${pbRes.status}`,
+        },
+        {
+          label: "P/OE",
+          value: pToOeRes.value != null ? pToOeRes.value.toFixed(2) : "n/a",
+          hint: pToOeRes.status === 200 ? undefined : `HTTP ${pToOeRes.status}`,
+        },
+
+        // --- Profitability ---
         {
           label: "ROE",
-          // English: assume backend returns decimals (e.g., 0.23 for 23%).
-          value: roeValue != null ? `${(roeValue * 100).toFixed(1)}%` : "n/a",
-          hint: roeResp.ok ? undefined : `HTTP ${roeResp.status}`,
+          value: roeRes.value != null ? `${(roeRes.value * 100).toFixed(1)}%` : "n/a",
+          hint: roeRes.status === 200 ? undefined : `HTTP ${roeRes.status}`,
         },
         {
-          label: "FCF Yield",
-          // English: assume backend returns decimals (e.g., 0.052 for 5.2%).
-          value: fcfYieldValue != null ? `${(fcfYieldValue * 100).toFixed(1)}%` : "n/a",
-          hint: fcfYieldResp.ok ? undefined : `HTTP ${fcfYieldResp.status}`,
+          label: "ROA",
+          value: roaRes.value != null ? `${(roaRes.value * 100).toFixed(1)}%` : "n/a",
+          hint: roaRes.status === 200 ? undefined : `HTTP ${roaRes.status}`,
         },
         {
           label: "Net Margin",
-          // English: assume backend returns decimals (e.g., 0.18 for 18%).
-          value: netMarginValue != null ? `${(netMarginValue * 100).toFixed(1)}%` : "n/a",
-          hint: netMarginResp.ok ? undefined : `HTTP ${netMarginResp.status}`,
+          value: netMarginRes.value != null ? `${(netMarginRes.value * 100).toFixed(1)}%` : "n/a",
+          hint: netMarginRes.status === 200 ? undefined : `HTTP ${netMarginRes.status}`,
+        },
+        {
+          label: "FCF Yield",
+          value: fcfYieldRes.value != null ? `${(fcfYieldRes.value * 100).toFixed(1)}%` : "n/a",
+          hint: fcfYieldRes.status === 200 ? undefined : `HTTP ${fcfYieldRes.status}`,
+        },
+        {
+          label: "OE Yield",
+          value: oeYieldRes.value != null ? `${(oeYieldRes.value * 100).toFixed(1)}%` : "n/a",
+          hint: oeYieldRes.status === 200 ? undefined : `HTTP ${oeYieldRes.status}`,
+        },
+        {
+          label: "FCF Margin",
+          // English: assume backend returns decimal (e.g., 0.18 -> 18.0%)
+          value: fcfMarginRes.value != null ? `${(fcfMarginRes.value * 100).toFixed(1)}%` : "n/a",
+          hint: fcfMarginRes.status === 200 ? undefined : `HTTP ${fcfMarginRes.status}`,
+        },
+
+        // --- Efficiency / Growth ---
+        {
+          label: "Asset Turnover",
+          value: atRes.value != null ? atRes.value.toFixed(2) : "n/a",
+          hint: atRes.status === 200 ? undefined : `HTTP ${atRes.status}`,
+        },
+        {
+          label: "Equity CAGR",
+          value: cagrRes.value != null ? `${(cagrRes.value * 100).toFixed(1)}%` : "n/a",
+          hint: cagrRes.status === 200 ? undefined : `HTTP ${cagrRes.status}`,
+        },
+
+        // --- Solvency / Leverage ---
+        {
+          label: "Debt/Equity",
+          value: dteRes.value != null ? dteRes.value.toFixed(2) : "n/a",
+          hint: dteRes.status === 200 ? undefined : `HTTP ${dteRes.status}`,
+        },
+        {
+          label: "Equity Ratio",
+          value: eqRatioRes.value != null ? `${(eqRatioRes.value * 100).toFixed(1)}%` : "n/a",
+          hint: eqRatioRes.status === 200 ? undefined : `HTTP ${eqRatioRes.status}`,
+        },
+        {
+          label: "Debt/Assets",
+          value: dtaRes.value != null ? `${(dtaRes.value * 100).toFixed(1)}%` : "n/a",
+          hint: dtaRes.status === 200 ? undefined : `HTTP ${dtaRes.status}`,
+        },
+
+        // --- Per-Share Metrics ---
+        {
+          label: "EPS",
+          value: epsRes.value != null ? epsRes.value.toFixed(2) : "n/a",
+          hint: epsRes.status === 200 ? undefined : `HTTP ${epsRes.status}`,
+        },
+        {
+          label: "BVPS",
+          value: bvpsRes.value != null ? bvpsRes.value.toFixed(2) : "n/a",
+          hint: bvpsRes.status === 200 ? undefined : `HTTP ${bvpsRes.status}`,
+        },
+        {
+          label: "OEPS",
+          value: oepsRes.value != null ? oepsRes.value.toFixed(2) : "n/a",
+          hint: oepsRes.status === 200 ? undefined : `HTTP ${oepsRes.status}`,
+        },
+
+        // --- Cash Flow / Owner Earnings ---
+        {
+          label: "FCF (abs)",
+          value: fcfAbsRes.value != null ? `${fcfAbsRes.value.toFixed(0)}` : "n/a",
+          hint: fcfAbsRes.status === 200 ? undefined : `HTTP ${fcfAbsRes.status}`,
+        },
+        {
+          label: "Owner Earnings",
+          value: oeRes.value != null ? `${oeRes.value.toFixed(0)}` : "n/a",
+          hint: oeRes.status === 200 ? undefined : `HTTP ${oeRes.status}`,
         },
       ];
-
       setMetrics(list);
     } catch (e: unknown) {
       console.error("[panel] load failed:", e);
@@ -211,7 +388,9 @@ export default function AnalyticsMiniPanel() {
         padding: 12,
         display: "grid",
         gap: 10,
-        maxWidth: 420,
+        width: "100%",
+        boxSizing: "border-box",
+        marginTop: 16,
       }}
     >
       <div style={{ fontWeight: 600 }}>Analytics (mini)</div>
@@ -287,6 +466,31 @@ export default function AnalyticsMiniPanel() {
           ))
         )}
       </div>
+
+      {/* Price trend (sparkline) */}
+      {spark.length > 0 && (
+        <div
+          style={{
+            border: "1px solid #333",
+            borderRadius: 12,
+            padding: 10,
+            marginTop: 8,
+          }}
+        >
+          <div style={{ fontSize: 12, opacity: 0.8, marginBottom: 6 }}>Price trend (180d)</div>
+          <div style={{ width: "100%", height: 60 }}>
+            {/* English: pure SVG sparkline, no deps */}
+            <svg viewBox="0 0 600 60" preserveAspectRatio="none" width="100%" height="100%">
+              <polyline
+                points={buildPolyline(spark, 600, 50)}
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              />
+            </svg>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

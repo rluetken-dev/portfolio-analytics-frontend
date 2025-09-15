@@ -52,8 +52,8 @@ export async function getLatestPrice(symbol: string): Promise<LatestMetric<numbe
 
   try {
     const res = await fetchJson<PriceApiResponse>({
-      path: "/api/analytics/price",
-      query: { symbol: sym },
+      // Build the query string yourself; only 'path' is used by your fetchJson
+      path: `/api/analytics/price?symbol=${encodeURIComponent(sym)}`,
     });
 
     // one-time debug log to verify the raw shape (safe to keep during dev)

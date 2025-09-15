@@ -4,6 +4,9 @@ import type { CSSProperties } from "react";
 import { fetchJson } from "../services/api/client";
 import { Tooltip, ResponsiveContainer, Cell, PieChart, Pie } from "recharts";
 
+// English comment: add the small analytics panel component
+import AnalyticsMiniPanel from "../components/AnalyticsMiniPanel";
+
 /** ---------------------------------------------------------------
  * Local UI styles (compact, card-like, no extra dependencies)
  * --------------------------------------------------------------- */
@@ -24,14 +27,14 @@ const styles = {
   },
 
   control: {
-    height: 36,                 
+    height: 36,
     lineHeight: "36px",
     minHeight: 0,
     boxSizing: "border-box",
     fontSize: 13,
     borderRadius: 10,
-    padding: "0 10px",          
-  } as CSSProperties,  
+    padding: "0 10px",
+  } as CSSProperties,
 
   input: {
     padding: "0 10px",
@@ -48,7 +51,7 @@ const styles = {
   } as CSSProperties,
 
   btn: {
-    padding: "0 12px",          
+    padding: "0 12px",
     borderRadius: 10,
     border: "1px solid #d4d4d8",
     background: "#fff",
@@ -57,7 +60,7 @@ const styles = {
     display: "inline-flex",
     alignItems: "center",
     justifyContent: "center",
-    whiteSpace: "nowrap",       
+    whiteSpace: "nowrap",
   } as CSSProperties,
   btnDisabled: { opacity: 0.55, cursor: "not-allowed" } as CSSProperties,
   btnSoft: { background: "#fafafa" } as CSSProperties,
@@ -444,7 +447,7 @@ export default function Companies() {
                 setLimit(next);
                 void load({ q: query, limit: next }); // EN: fetch immediately with new limit
               }}
-             style={{
+              style={{
                 ...styles.control,
                 ...styles.select,
               }}
@@ -483,7 +486,7 @@ export default function Companies() {
           <button
             onClick={() => void load({ q: query })}
             disabled={batchBusy}
-             style={{
+            style={{
               ...styles.control,
               ...styles.btn,
               ...(batchBusy ? styles.btnDisabled : {}),
@@ -647,6 +650,11 @@ export default function Companies() {
           </button>
         </div>
       )}
+
+      {/* English comment: a tiny analytics panel (symbol -> price + P/E) */}
+      <div style={{ marginBottom: 12 }}>
+        <AnalyticsMiniPanel />
+      </div>
 
       {/* Chart card: Companies per Sector (only if we have at least 2 sectors) */}
       {sectorData.length >= 2 && (

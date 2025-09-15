@@ -59,3 +59,31 @@ export async function getLatestCloseFromQuotes(symbol: string): Promise<LatestMe
     return { symbol: sym, value: null, unit: "USD", status: 500 };
   }
 }
+
+// English: fetch & persist recent quotes for one or more symbols, then return stats
+type RefreshResponse = {
+  ok: boolean;
+  symbols: string[];
+  inserted: number;
+  skipped: number;
+};
+
+export async function refreshQuotes(symbols: string, range = "24m"): Promise<RefreshResponse> {
+  const list = (symbols ?? "").trim();
+  if (!list) throw new Error("No symbols");
+
+  const url = `http://localhost:5046/api/quotes/refresh?symbols=${encodeURIComponent(
+    list,
+  )}&range=${encodeURIComponent(range)}`;
+
+  const resp = await fetch(url, {
+    method: "POST",
+    headers: { Accept: "application/json" },
+  });
+
+  if (!resp.ok) {
+    throw new Error(`HTTP ${resp.status}`);
+  }
+
+  return (await resp.json()) as RefreshResponse;
+}

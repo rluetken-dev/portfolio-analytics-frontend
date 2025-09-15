@@ -1,6 +1,7 @@
 // src/components/AnalyticsMiniPanel.tsx
 import { useCallback, useMemo, useState, useEffect } from "react";
 import { getLatestCloseFromQuotes } from "../services/api/quotes";
+import { refreshQuotes } from "../services/api/quotes";
 
 /**
  * Very small self-contained panel to show two metrics for a symbol:
@@ -532,6 +533,48 @@ export default function AnalyticsMiniPanel() {
           {loading ? "Loading..." : "Load"}
         </button>
       </div>
+
+      {/* Show a fetch button when no cached Price is available */}
+      {!loading &&
+        sections.some(
+          (sec) =>
+            sec.title === "Valuation" &&
+            sec.items.some((i) => i.label === "Price" && i.value === "n/a"),
+        ) && (
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <button
+              onClick={async () => {
+                try {
+                  setLoading(true);
+                  setErr(null);
+                  // English: fetch ~2 years of quotes; backend upserts; then reload the panel
+                  await refreshQuotes(symbol, "24m");
+                  await load();
+                } catch (e) {
+                  console.error("[panel] refresh quotes failed:", e);
+                  setErr("Could not load price data (refresh).");
+                } finally {
+                  setLoading(false);
+                }
+              }}
+              disabled={loading}
+              style={{
+                padding: "6px 10px",
+                borderRadius: 8,
+                border: "1px solid #333",
+                background: "transparent",
+                cursor: loading ? "default" : "pointer",
+                fontSize: 12,
+              }}
+            >
+              Get price data
+            </button>
+
+            <span style={{ fontSize: 12, opacity: 0.7 }}>
+              No local price data found. Get and save now.
+            </span>
+          </div>
+        )}
 
       {err && <div style={{ fontSize: 12, color: "#f87171", marginBottom: 8 }}>{err}</div>}
 

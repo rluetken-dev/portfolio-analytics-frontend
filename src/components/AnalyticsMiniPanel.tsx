@@ -189,6 +189,59 @@ const makeRowGrid = (cols: number): React.CSSProperties => ({
   gap: 6,
 });
 
+// Tiny inline status pill (reusable)
+function StatusPill({
+  kind,
+  children,
+}: {
+  kind: "ok" | "err" | "info";
+  children: React.ReactNode;
+}) {
+  // English: minimal visual feedback capsule
+  const base: React.CSSProperties = {
+    fontSize: 12,
+    padding: "2px 8px",
+    borderRadius: 999,
+    border: "1px solid",
+    display: "inline-block",
+  };
+  const theme =
+    kind === "ok"
+      ? { borderColor: "#cce5cc", background: "#f6fff6" }
+      : kind === "err"
+        ? { borderColor: "#f5c2c7", background: "#fff6f6" }
+        : { borderColor: "#ddd", background: "#f7f7f7" };
+  return <span style={{ ...base, ...theme }}>{children}</span>;
+}
+
+// English: turn raw error (stack/JSON) into a short, user-friendly message
+function toUserMessage(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err ?? "Unknown error");
+  const low = raw.toLowerCase();
+
+  // English: identify common upstream cases (FMP free tier / rate limit)
+  if (
+    low.includes("402 payment required") ||
+    low.includes("premium query parameter") ||
+    low.includes("not available under your current subscription") ||
+    low.includes("subscription page")
+  ) {
+    return "Upstream free-tier limit for this symbol (FMP). Nothing saved.";
+  }
+
+  if (low.includes("429 too many requests") || low.includes("limit reach")) {
+    return "Upstream rate limit reached (FMP). Please try again later.";
+  }
+
+  // English: generic gateway error
+  if (low.includes("502 bad gateway") || low.includes("bad gateway")) {
+    return "Backend temporarily unavailable. Please retry.";
+  }
+
+  // English: final fallback — trim very long texts
+  return raw.length > 140 ? raw.slice(0, 140) + "…" : raw;
+}
+
 export default function AnalyticsMiniPanel() {
   const [symbol, setSymbol] = useState("AAPL");
   const [loading, setLoading] = useState(false);
@@ -200,6 +253,12 @@ export default function AnalyticsMiniPanel() {
   const [liveBusy, setLiveBusy] = useState(false);
   const [fundBusy, setFundBusy] = useState(false);
   const [fundRes, setFundRes] = useState<SnapshotResult | null>(null);
+  const [fundErr, setFundErr] = useState<string | null>(null);
+  const [liveStatus, setLiveStatus] = useState<string | null>(null);
+  const [liveErr, setLiveErr] = useState<string | null>(null);
+  const [fundSnapStatus, setFundSnapStatus] = useState<string | null>(null);
+  const [fundSnapErr, setFundSnapErr] = useState<string | null>(null);
+  const [fundSaveStatus, setFundSaveStatus] = useState<string | null>(null);
 
   // English: normalized symbol for comparisons (prevents stale mismatches)
   const currentSym = useMemo(() => symbol.trim().toUpperCase(), [symbol]);
@@ -214,6 +273,17 @@ export default function AnalyticsMiniPanel() {
 
   // Centralized backend base (adjust if your backend port changes)
   const backendBase = useMemo(() => "http://localhost:5046", []);
+
+  // English: auto-hide error pills after 5s
+  useEffect(() => {
+    if (!liveErr && !fundSnapErr && !fundErr) return;
+    const t = setTimeout(() => {
+      setLiveErr(null);
+      setFundSnapErr(null);
+      setFundErr(null);
+    }, 5000);
+    return () => clearTimeout(t);
+  }, [liveErr, fundSnapErr, fundErr]);
 
   // English: show fundamentals CTAs only when many metrics are missing
   const manyNa =
@@ -646,23 +716,40 @@ export default function AnalyticsMiniPanel() {
           </div>
         )}
 
-      {/* English: show live button when a section is rendered; keep it visible during fetch */}
+      {/* English: Get live price button */}
       {sections.length > 0 && (
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
           <button
             onClick={async () => {
               try {
-                setLiveBusy(true); // start local busy (no global loading)
+                setLiveBusy(true); // English: start local busy (no global loading)
                 setErr(null);
+                setLiveErr(null);
+                setLiveStatus(null);
+
                 const startSym = currentSym; // English: capture symbol at click time
                 const q = await getCurrentPrice(startSym);
-                // English: apply only if user didn't change symbol mid-flight
+
+                // English: keep original 'live' for your delta badge in Price card
                 if (startSym === currentSym) setLive(q);
+
+                // English: persistent status line (always set after click)
+                const status =
+                  `live (${q.symbol ?? startSym}): ` +
+                  `${typeof q.price === "number" ? q.price.toFixed(2) + " USD" : "n/a"}` +
+                  `${q.latestTradingDay ? ` — ${q.latestTradingDay}` : ""}` +
+                  ` (HTTP ${q.status})`;
+                setLiveStatus(status);
+
+                // English: transient error pill when upstream fails / no price
+                if (q.status !== 200 || typeof q.price !== "number") {
+                  setLiveErr(toUserMessage(new Error(`HTTP ${q.status} — live price unavailable`)));
+                }
               } catch (e) {
-                console.error("[panel] live price failed:", e);
-                setErr("Could not fetch live price.");
+                setLiveErr(toUserMessage(e));
+                setLiveStatus(`live (${currentSym}): n/a (HTTP 500)`);
               } finally {
-                setLiveBusy(false); // end local busy
+                setLiveBusy(false);
               }
             }}
             disabled={loading || liveBusy}
@@ -673,114 +760,142 @@ export default function AnalyticsMiniPanel() {
               background: "transparent",
               cursor: loading || liveBusy ? "default" : "pointer",
               fontSize: 12,
-              opacity: loading || liveBusy ? 0.7 : 1, // English: subtle disabled look
+              opacity: loading || liveBusy ? 0.7 : 1,
             }}
             title={`Fetch live price for ${currentSym}`}
           >
             {liveBusy ? "Fetching…" : "Get live price"}
           </button>
 
-          {/* English: show live price with currency and its date appended */}
-          {live && live.symbol?.toUpperCase() === currentSym && (
-            <span style={{ fontSize: 12, opacity: 0.7 }}>
-              live ({live.symbol}): {live.price != null ? `${live.price.toFixed(2)} USD` : "n/a"}
-              {live.latestTradingDay ? ` — ${live.latestTradingDay}` : ""}
-              {` (HTTP ${live.status})`}
-            </span>
-          )}
+          {/* English: transient error pill + persistent status line */}
+          {liveStatus && <span style={{ fontSize: 12, opacity: 0.7 }}>{liveStatus}</span>}
+          {liveErr && <StatusPill kind="err">{liveErr}</StatusPill>}
         </div>
       )}
 
-      {/* English: show CTA if any metric is "n/a" (likely fundamentals missing) */}
-      {manyNa && (
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <button
-            onClick={async () => {
-              try {
-                setFundBusy(true);
-                setErr(null);
-                setFundRes(null);
+      {/* English: Get fundamentals button */}
+      {(manyNa || fundSnapErr || fundSnapStatus) && (
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          {manyNa && (
+            <button
+              onClick={async () => {
+                try {
+                  setFundBusy(true);
+                  setErr(null);
+                  setFundSnapErr(null);
+                  setFundSnapStatus(null);
+                  setFundRes(null);
 
-                // English: get last 5 annual rows (income/balance/cash + TTM metrics)
-                const res = await fetchFundamentalsSnapshot(currentSym, "annual", 5);
-                setFundRes(res);
-                console.log("[fundamentals snapshot]", res); // English: inspect payload in DevTools
+                  const res = await fetchFundamentalsSnapshot(currentSym, "annual", 5);
+                  setFundRes(res);
 
-                // NOTE: This does NOT persist. Analytics won't change yet.
-                // Next step: add a small POST /api/fundamentals/refresh to persist.
-              } catch (e) {
-                console.error("[panel] fundamentals snapshot failed:", e);
-                setErr("Could not fetch fundamentals snapshot.");
-              } finally {
-                setFundBusy(false);
-              }
-            }}
-            disabled={loading || fundBusy}
-            style={{
-              padding: "6px 10px",
-              borderRadius: 8,
-              border: "1px solid #333",
-              background: "transparent",
-              cursor: loading || fundBusy ? "default" : "pointer",
-              fontSize: 12,
-              opacity: loading || fundBusy ? 0.7 : 1,
-            }}
-            title={`Fetch fundamentals snapshot (not persisted) for ${currentSym}`}
-          >
-            {fundBusy ? "Fetching…" : "Get fundamentals (5y)"}
-          </button>
-
-          {/* English: tiny inline status preview to avoid layout shift */}
-          {fundRes && (
-            <span style={{ fontSize: 12, opacity: 0.7 }}>
-              fundamentals: HTTP {fundRes.status}
-              {fundRes.data ? " — snapshot received" : " — no data"}
-            </span>
+                  if (res.status === 200 && res.data) {
+                    setFundSnapStatus(`Fundamentals: snapshot received (HTTP ${res.status})`);
+                  } else {
+                    // English: persistent status + error pill when not 200
+                    setFundSnapStatus(
+                      `Fundamentals: ${res.status === 200 ? "no data" : "unavailable"} (HTTP ${res.status})`,
+                    );
+                    if (res.status !== 200) {
+                      setFundSnapErr(
+                        toUserMessage(
+                          new Error(`HTTP ${res.status} — fundamentals snapshot unavailable`),
+                        ),
+                      );
+                    }
+                  }
+                } catch (e) {
+                  // English: concise pill + short status
+                  setFundSnapErr(toUserMessage(e));
+                  setFundSnapStatus("Fundamentals: failed.");
+                } finally {
+                  setFundBusy(false);
+                }
+              }}
+              disabled={loading || fundBusy}
+              style={{
+                padding: "6px 10px",
+                borderRadius: 8,
+                border: "1px solid #333",
+                background: "transparent",
+                cursor: loading || fundBusy ? "default" : "pointer",
+                fontSize: 12,
+                opacity: loading || fundBusy ? 0.7 : 1,
+              }}
+              title={`Fetch fundamentals snapshot (not persisted) for ${currentSym}`}
+            >
+              {fundBusy ? "Fetching…" : "Get fundamentals (5y)"}
+            </button>
           )}
+
+          {/* English: transient error pill + persistent status line */}
+          {fundSnapStatus && <span style={{ fontSize: 12, opacity: 0.7 }}>{fundSnapStatus}</span>}
+          {fundSnapErr && <StatusPill kind="err">{fundSnapErr}</StatusPill>}
         </div>
       )}
 
-      {/* English: persist fundamentals into DB (annual, last 5y) and reload */}
-      {manyNa && (
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <button
-            onClick={async () => {
-              try {
-                setFundBusy(true); // reuse your fundBusy flag
-                setErr(null);
+      {/* English: Save fundamentals button */}
+      {(manyNa || fundErr || fundSaveStatus) && (
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          {manyNa && (
+            <button
+              onClick={async () => {
+                try {
+                  setFundBusy(true);
+                  setErr(null);
+                  setFundErr(null);
+                  setFundSaveStatus(null);
 
-                const res = await refreshFundamentals(currentSym, "annual", 5);
-                console.log("[fundamentals refresh]", res); // debug counters
+                  const res = await refreshFundamentals(currentSym, "annual", 5);
 
-                // English: after persist, reload panel so analytics can pick up DB data
-                await load();
-              } catch (e) {
-                console.error("[panel] fundamentals refresh failed:", e);
-                setErr(
-                  e instanceof Error ? e.message : "Could not persist fundamentals (refresh).",
-                );
-              } finally {
-                setFundBusy(false);
-              }
-            }}
-            disabled={loading || fundBusy}
-            style={{
-              padding: "6px 10px",
-              borderRadius: 8,
-              border: "1px solid #333",
-              background: "transparent",
-              cursor: loading || fundBusy ? "default" : "pointer",
-              fontSize: 12,
-              opacity: loading || fundBusy ? 0.7 : 1,
-            }}
-            title={`Persist fundamentals (annual, 5y) for ${currentSym}`}
-          >
-            {fundBusy ? "Persisting…" : "Save fundamentals (5y annual)"}
-          </button>
+                  // English: build persistent status line (no success pill, only errors show a pill)
+                  const allZero =
+                    (res.inserted?.income ?? 0) === 0 &&
+                    (res.inserted?.balance ?? 0) === 0 &&
+                    (res.inserted?.cash ?? 0) === 0 &&
+                    (res.skipped?.income ?? 0) === 0 &&
+                    (res.skipped?.balance ?? 0) === 0 &&
+                    (res.skipped?.cash ?? 0) === 0;
 
-          <span style={{ fontSize: 12, opacity: 0.7 }}>
-            Stores income/balance/cash in DB, then reloads.
-          </span>
+                  const status = allZero
+                    ? `Saved ${res.symbol} (${res.period}): no changes (up-to-date or free tier).`
+                    : `Saved ${res.symbol} (${res.period}) → ` +
+                      `income +${res.inserted?.income ?? 0}/${res.skipped?.income ?? 0}, ` +
+                      `balance +${res.inserted?.balance ?? 0}/${res.skipped?.balance ?? 0}, ` +
+                      `cash +${res.inserted?.cash ?? 0}/${res.skipped?.cash ?? 0}`;
+
+                  setFundSaveStatus(status);
+
+                  // English: reload so analytics can pick up newly persisted data
+                  await load();
+                } catch (e) {
+                  const message = toUserMessage(e);
+                  setFundErr(message); // English: transient error pill
+                  setFundSaveStatus("Save failed."); // English: persistent short status
+                  console.warn("[panel] fundamentals refresh failed:", e);
+                } finally {
+                  setFundBusy(false);
+                }
+              }}
+              disabled={loading || fundBusy}
+              style={{
+                padding: "6px 10px",
+                borderRadius: 8,
+                border: "1px solid #333",
+                background: "transparent",
+                cursor: loading || fundBusy ? "default" : "pointer",
+                fontSize: 12,
+                opacity: loading || fundBusy ? 0.7 : 1,
+              }}
+              title={`Persist fundamentals (annual, 5y) for ${currentSym}`}
+            >
+              {fundBusy ? "Persisting…" : "Save fundamentals (5y annual)"}
+            </button>
+          )}
+
+          {/* English: transient error pill + persistent status line */}
+          {fundSaveStatus && <span style={{ fontSize: 12, opacity: 0.7 }}>{fundSaveStatus}</span>}
+          {fundErr && <StatusPill kind="err">{fundErr}</StatusPill>}
         </div>
       )}
 

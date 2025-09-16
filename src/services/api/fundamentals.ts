@@ -1,7 +1,10 @@
 // src/services/api/fundamentals.ts
+
+// English: feature flag to disable the temporary ingest fallback
+const FALLBACK_ENABLED = false; // set to true only if backend refresh is stubbed
+
 // English: fetch compact fundamentals snapshot from your backend's /stable proxy.
 // NOTE: This does NOT persist; it's just to inspect and unblock UI quickly.
-
 export type StableSnapshot = {
   income?: unknown[];
   balance?: unknown[];
@@ -74,6 +77,57 @@ export type FundamentalsRefreshResponse = {
   skipped: { income: number; balance: number; cash: number };
 };
 
+// English: shape of ingest endpoint responses (loose but typed)
+type IngestResponse = {
+  inserted?: number;
+  skipped?: number;
+  upserts?: number;
+};
+
+// English: tiny helper to hit ingest endpoints sequentially (income -> balance -> cash)
+async function ingestFallback(
+  symbol: string,
+  period: "annual" | "quarter",
+  years: number,
+): Promise<{
+  inserted: { income: number; balance: number; cash: number };
+  skipped: { income: number; balance: number; cash: number };
+}> {
+  const limit = Math.max(1, years);
+
+  async function hit(path: string) {
+    const url = `http://localhost:5046${path}`;
+    const resp = await fetch(url, { headers: { Accept: "application/json" } });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status} on ${path}`);
+
+    const j: IngestResponse = await resp.json();
+
+    // English: normalize counters defensively
+    const inserted = Number(j.inserted ?? j.upserts ?? 0) || 0;
+    const skipped = Number(j.skipped ?? 0) || 0;
+    return { inserted, skipped };
+  }
+
+  const inc = await hit(
+    `/api/ingest/income/${encodeURIComponent(symbol)}?period=${encodeURIComponent(period)}&limit=${limit}`,
+  );
+  const bal = await hit(
+    `/api/ingest/balance/${encodeURIComponent(symbol)}?period=${encodeURIComponent(period)}&limit=${limit}`,
+  );
+  const cas = await hit(
+    `/api/ingest/cash/${encodeURIComponent(symbol)}?period=${encodeURIComponent(period)}&limit=${limit}`,
+  );
+
+  return {
+    inserted: { income: inc.inserted, balance: bal.inserted, cash: cas.inserted },
+    skipped: { income: inc.skipped, balance: bal.skipped, cash: cas.skipped },
+  };
+}
+
+/**
+ * Persist fundamentals (Income/Balance/Cash) for a symbol.
+ * POST /api/fundamentals/refresh?symbol=&period=&years=
+ */
 export async function refreshFundamentals(
   symbol: string,
   period: "annual" | "quarter" = "annual",
@@ -91,34 +145,36 @@ export async function refreshFundamentals(
     headers: { Accept: "application/json" },
   });
 
-  // English: surface HTTP code + response text for better debugging
+  // English: on HTTP error, throw with body text
   if (!resp.ok) {
     const text = await resp.text().catch(() => "");
     throw new Error(`HTTP ${resp.status}${text ? `: ${text}` : ""}`);
   }
 
-  return (await resp.json()) as FundamentalsRefreshResponse;
-}
+  const base = (await resp.json()) as FundamentalsRefreshResponse;
 
-// English: TTM metrics fallback (non-persistent, via backend stable proxy)
-export type TtmMetricsResult = {
-  status: number;
-  data: Record<string, unknown> | null;
-};
+  // English: only use fallback if explicitly enabled
+  if (FALLBACK_ENABLED) {
+    const allZero =
+      (base.inserted?.income ?? 0) === 0 &&
+      (base.inserted?.balance ?? 0) === 0 &&
+      (base.inserted?.cash ?? 0) === 0 &&
+      (base.skipped?.income ?? 0) === 0 &&
+      (base.skipped?.balance ?? 0) === 0 &&
+      (base.skipped?.cash ?? 0) === 0;
 
-export async function fetchTtmMetrics(symbol: string): Promise<TtmMetricsResult> {
-  const sym = (symbol ?? "").trim().toUpperCase();
-  if (!sym) return { status: 400, data: null };
-
-  const url = `http://localhost:5046/api/fundamentals/${encodeURIComponent(sym)}/metrics/ttm`;
-
-  try {
-    const resp = await fetch(url, { headers: { Accept: "application/json" } });
-    if (!resp.ok) return { status: resp.status, data: null };
-
-    const json = (await resp.json()) as Record<string, unknown>;
-    return { status: 200, data: json ?? null };
-  } catch {
-    return { status: 500, data: null };
+    if (allZero) {
+      const f = await ingestFallback(sym, period, years);
+      return {
+        ok: true,
+        symbol: sym,
+        period,
+        years,
+        inserted: f.inserted,
+        skipped: f.skipped,
+      };
+    }
   }
+
+  return base;
 }

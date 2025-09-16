@@ -244,7 +244,11 @@ function toUserMessage(err: unknown): string {
 
 export default function AnalyticsMiniPanel() {
   // --- Core query & global UI state ---
-  const [symbol, setSymbol] = useState("AAPL"); // English: user input; normalized via currentSym
+  const [symbol, setSymbol] = useState("AAPL"); // English: user input
+
+  // English: normalized symbol (must be declared early so helpers can use it)
+  const currentSym = useMemo(() => symbol.trim().toUpperCase(), [symbol]);
+
   const [loading, setLoading] = useState(false); // English: global page loading (metrics reload)
   const [err, setErr] = useState<string | null>(null); // English: global banner error (rare)
 
@@ -274,8 +278,46 @@ export default function AnalyticsMiniPanel() {
   const [fundSnapErr, setFundSnapErr] = useState<string | null>(null); // English: Get fundamentals error
   const [fundErr, setFundErr] = useState<string | null>(null); // English: Save fundamentals error
 
-  // English: normalized symbol for comparisons (prevents stale mismatches)
-  const currentSym = useMemo(() => symbol.trim().toUpperCase(), [symbol]);
+  // --- Pinned symbols (quick switch) ---
+  const [pinned, setPinned] = useState<string[]>(() => {
+    // English: read pinned list from localStorage (uppercase, cap length)
+    try {
+      const raw = localStorage.getItem("analytics:pinned");
+      if (raw) {
+        const arr = JSON.parse(raw);
+        if (Array.isArray(arr)) {
+          return arr.map((s: unknown) => String(s).toUpperCase()).slice(0, 12);
+        }
+      }
+    } catch (e) {
+      console.warn("[pinned] read failed:", e); // English: ignore storage read errors
+    }
+    return ["AAPL", "AMD"];
+  });
+
+  // English: persist pinned list on change
+  useEffect(() => {
+    try {
+      localStorage.setItem("analytics:pinned", JSON.stringify(pinned));
+    } catch (e) {
+      console.warn("[pinned] write failed:", e); // English: ignore quota errors; best-effort
+    }
+  }, [pinned]);
+
+  // English: add current symbol to pinned (dedupe)
+  const pinAddCurrent = useCallback((): void => {
+    const sym = currentSym;
+    if (!sym) return;
+    setPinned((prev) => (prev.includes(sym) ? prev : [...prev, sym]));
+  }, [currentSym, setPinned]);
+
+  // English: remove a symbol from pinned
+  const pinRemove = useCallback(
+    (s: string): void => {
+      setPinned((prev) => prev.filter((x) => x !== s));
+    },
+    [setPinned],
+  );
 
   // load last symbol from localStorage on mount
   useEffect(() => {
@@ -309,34 +351,29 @@ export default function AnalyticsMiniPanel() {
     );
   }, [sections]);
 
-  // English: clear per-action status/errors/busy flags when switching company or reloading
-  const resetActionUi = useCallback(() => {
+  // English: clear per-action status/errors/busy flags when switching company
+  const resetActionUi = useCallback((): void => {
     // status lines
     setPriceFetchStatus(null);
     setLiveStatus(null);
     setFundSnapStatus(null);
     setFundSaveStatus(null);
-
     // error pills
     setPriceFetchErr(null);
     setLiveErr(null);
     setFundSnapErr(null);
     setFundErr(null);
-
     // busy flags
     setPriceBusy(false);
     setLiveBusy(false);
     setFundBusy(false);
-
-    // snapshot/debug
+    // snapshot/debug + live baseline
     setFundRes(null);
-
-    // live readouts tied to previous company
     setLive(null);
     setBaseClose(null);
   }, []);
 
-  // English: whenever the (normalized) symbol changes, wipe action UI to avoid stale statuses
+  // English: whenever the symbol changes, wipe action UI to avoid stale statuses
   useEffect(() => {
     resetActionUi();
     // Also clear sparkline/sections until next load
@@ -346,8 +383,9 @@ export default function AnalyticsMiniPanel() {
 
   // English: show fundamentals CTAs only when many metrics are missing
   const manyNa =
-    sections.reduce((sum, sec) => sum + sec.items.filter((i) => i.value === "n/a").length, 0) >= 6; // tweak threshold if you like
+    sections.reduce((sum, sec) => sum + sec.items.filter((i) => i.value === "n/a").length, 0) >= 6;
 
+  // --- Main load routine (your existing body kept intact) ---
   const load = useCallback(async () => {
     const sym = symbol.trim().toUpperCase();
     localStorage.setItem(STORAGE_KEY, sym);
@@ -374,9 +412,7 @@ export default function AnalyticsMiniPanel() {
 
       try {
         const tsResp = await fetch(
-          `${backendBase}/api/quotes/timeseries?symbol=${encodeURIComponent(sym)}&from=${fmt(
-            from,
-          )}&to=${fmt(to)}`,
+          `${backendBase}/api/quotes/timeseries?symbol=${encodeURIComponent(sym)}&from=${fmt(from)}&to=${fmt(to)}`,
           { headers: { Accept: "application/json" } },
         );
 
@@ -491,7 +527,6 @@ export default function AnalyticsMiniPanel() {
         if (!snapshot) {
           const snap = await fetchFundamentalsSnapshot(sym, "annual", 1);
           if (snap.status !== 200) {
-            // English: surface the exact HTTP status to the error banner for visibility
             setErr((prev) => prev ?? `Fundamentals snapshot fallback failed (HTTP ${snap.status})`);
           }
           snapshot = snap.data ?? null;
@@ -540,11 +575,7 @@ export default function AnalyticsMiniPanel() {
                     : undefined
                   : `HTTP ${price.status}`,
             },
-            {
-              label: "P/E",
-              value: peValue != null ? formatRatio(peValue) : "n/a",
-              hint: peHint,
-            },
+            { label: "P/E", value: peValue != null ? formatRatio(peValue) : "n/a", hint: peHint },
             {
               label: "P/B",
               value: pbRes.value != null ? formatRatio(pbRes.value) : "n/a",
@@ -652,7 +683,6 @@ export default function AnalyticsMiniPanel() {
           items: [
             {
               label: "FCF (abs)",
-              // English: show billions/millions for readability; reuse price.unit as fallback
               value:
                 fcfAbsRes.value != null
                   ? `${formatCompactNumber(fcfAbsRes.value)} ${price.unit ?? "USD"}`
@@ -681,6 +711,21 @@ export default function AnalyticsMiniPanel() {
     }
   }, [backendBase, symbol, fundRes]);
 
+  // English: switch to a pinned symbol and trigger an immediate analytics load
+  const pinSwitch = useCallback(
+    (s: string): void => {
+      const sym = (s ?? "").trim().toUpperCase();
+      if (!sym) return;
+      setSymbol(sym);
+      resetActionUi(); // English: clear per-action UI for a fresh symbol view
+      // English: defer load to next tick so state is applied before reading it
+      setTimeout(() => {
+        load().catch((err) => console.warn("[pinned] load failed:", err));
+      }, 0);
+    },
+    [load, resetActionUi, setSymbol],
+  );
+
   return (
     <div
       style={{
@@ -694,19 +739,90 @@ export default function AnalyticsMiniPanel() {
         marginTop: 16,
       }}
     >
-      <div style={{ fontWeight: 600 }}>Analytics (mini)</div>
+      <div style={{ fontWeight: 600 }}>Analytics</div>
 
-      {/* Input + Button */}
+      {/* English: render pinned buttons */}
+      <div
+        style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginBottom: 6 }}
+      >
+        {pinned.map((s) => (
+          <div
+            key={s}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              border: "1px solid #333",
+              borderRadius: 999,
+              padding: "2px 6px",
+              background: s === currentSym ? "#111" : "transparent",
+            }}
+            title={`Switch to ${s}`}
+          >
+            <button
+              onClick={() => pinSwitch(s)}
+              style={{
+                padding: "2px 6px",
+                borderRadius: 8,
+                border: "none",
+                background: "transparent",
+                color: "inherit",
+                cursor: "pointer",
+                fontSize: 12,
+              }}
+            >
+              {s}
+            </button>
+            <button
+              onClick={() => pinRemove(s)}
+              title="Remove"
+              aria-label={`Remove ${s}`}
+              style={{
+                padding: "0 6px",
+                borderRadius: 6,
+                border: "1px solid #333",
+                background: "transparent",
+                color: "inherit",
+                cursor: "pointer",
+                fontSize: 12,
+                lineHeight: 1,
+              }}
+            >
+              ×
+            </button>
+          </div>
+        ))}
+
+        <button
+          onClick={pinAddCurrent}
+          title={`Pin ${currentSym}`}
+          style={{
+            padding: "2px 8px",
+            borderRadius: 999,
+            border: "1px solid #333",
+            background: "transparent",
+            color: "inherit",
+            cursor: "pointer",
+            fontSize: 12,
+          }}
+        >
+          + Pin current
+        </button>
+      </div>
+
+      {/* English: Search bar + button */}
       <div style={{ display: "flex", gap: 8 }}>
         <input
           value={symbol}
+          onChange={(e) => setSymbol(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !loading) {
               e.preventDefault();
-              load();
+              // English: clear per-action UI and load analytics for the current symbol
+              resetActionUi();
+              void load();
             }
           }}
-          onChange={(e) => setSymbol(e.target.value)}
           placeholder="Symbol (e.g., AAPL)"
           style={{
             flex: 1,
@@ -719,9 +835,8 @@ export default function AnalyticsMiniPanel() {
         />
         <button
           onClick={async () => {
-            const sym = symbol.trim().toUpperCase();
-            localStorage.setItem(STORAGE_KEY, sym);
-            // English: only the top-level manual reload clears all action UI
+            if (loading) return;
+            // English: clear per-action UI and load analytics for the current symbol
             resetActionUi();
             await load();
           }}
@@ -734,6 +849,7 @@ export default function AnalyticsMiniPanel() {
             cursor: loading ? "default" : "pointer",
             whiteSpace: "nowrap",
           }}
+          title={`Load analytics for ${currentSym}`}
         >
           {loading ? "Loading..." : "Load"}
         </button>
@@ -745,37 +861,43 @@ export default function AnalyticsMiniPanel() {
           {needsPriceCta && (
             <button
               onClick={async () => {
-  try {
-    setPriceBusy(true);
-    setErr(null);
-    setPriceFetchErr(null);
-    setPriceFetchStatus(null);
+                try {
+                  setPriceBusy(true);
+                  setErr(null);
+                  setPriceFetchErr(null);
+                  setPriceFetchStatus(null);
 
-    // English: trigger backend refresh (fetch & persist recent closes)
-    await refreshQuotes(currentSym, "24m");
+                  // English: trigger backend refresh (fetch & persist recent closes)
+                  await refreshQuotes(currentSym, "24m");
 
-    // English: verify persistence by asking the cache directly
-    const after = await getLatestCloseFromQuotes(currentSym);
+                  // English: verify persistence by asking the cache directly
+                  const after = await getLatestCloseFromQuotes(currentSym);
 
-    if (after.status === 200 && typeof after.value === "number") {
-      // English: success only if a numeric price is now present
-      setPriceFetchStatus(`Price data (${currentSym}): loaded & saved (HTTP ${after.status}).`);
-      // English: optionally refresh the whole panel (kept here)
-      await load();
-    } else {
-      // English: refresh returned but no cached price is available
-      setPriceFetchStatus(`Price data (${currentSym}): still unavailable (HTTP ${after.status}).`);
-      setPriceFetchErr(
-        toUserMessage(new Error(`HTTP ${after.status}: no cached price after refresh`))
-      );
-    }
-  } catch (e) {
-    setPriceFetchErr(toUserMessage(e));
-    setPriceFetchStatus(`Price data (${currentSym}): failed.`);
-  } finally {
-    setPriceBusy(false);
-  }
-}}
+                  if (after.status === 200 && typeof after.value === "number") {
+                    // English: success only if a numeric price is now present
+                    setPriceFetchStatus(
+                      `Price data (${currentSym}): loaded & saved (HTTP ${after.status}).`,
+                    );
+                    // English: optionally refresh the whole panel (kept here)
+                    await load();
+                  } else {
+                    // English: refresh returned but no cached price is available
+                    setPriceFetchStatus(
+                      `Price data (${currentSym}): still unavailable (HTTP ${after.status}).`,
+                    );
+                    setPriceFetchErr(
+                      toUserMessage(
+                        new Error(`HTTP ${after.status}: no cached price after refresh`),
+                      ),
+                    );
+                  }
+                } catch (e) {
+                  setPriceFetchErr(toUserMessage(e));
+                  setPriceFetchStatus(`Price data (${currentSym}): failed.`);
+                } finally {
+                  setPriceBusy(false);
+                }
+              }}
               disabled={priceBusy}
               style={{
                 padding: "6px 10px",

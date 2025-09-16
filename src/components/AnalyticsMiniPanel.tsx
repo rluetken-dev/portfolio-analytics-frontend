@@ -1,5 +1,5 @@
 // src/components/AnalyticsMiniPanel.tsx
-import { useCallback, useMemo, useState, useEffect } from "react";
+import { useCallback, useMemo, useState, useEffect, useRef } from "react";
 import { getLatestCloseFromQuotes } from "../services/api/quotes";
 import { refreshQuotes } from "../services/api/quotes";
 import { fetchFundamentalsSnapshot, type SnapshotResult } from "../services/api/fundamentals";
@@ -242,9 +242,16 @@ function toUserMessage(err: unknown): string {
   return raw.length > 140 ? raw.slice(0, 140) + "…" : raw;
 }
 
-export default function AnalyticsMiniPanel() {
+// English: optional initial symbol + notify parent when active symbol changes
+export default function AnalyticsMiniPanel({
+  initialSymbol,
+  onSymbolChange,
+}: {
+  initialSymbol?: string;
+  onSymbolChange?: (s: string) => void;
+}) {
   // --- Core query & global UI state ---
-  const [symbol, setSymbol] = useState("AAPL"); // English: user input
+  const [symbol, setSymbol] = useState(initialSymbol ?? "AAPL");
 
   // English: normalized symbol (must be declared early so helpers can use it)
   const currentSym = useMemo(() => symbol.trim().toUpperCase(), [symbol]);
@@ -304,13 +311,6 @@ export default function AnalyticsMiniPanel() {
     }
   }, [pinned]);
 
-  // English: add current symbol to pinned (dedupe)
-  const pinAddCurrent = useCallback((): void => {
-    const sym = currentSym;
-    if (!sym) return;
-    setPinned((prev) => (prev.includes(sym) ? prev : [...prev, sym]));
-  }, [currentSym, setPinned]);
-
   // English: remove a symbol from pinned
   const pinRemove = useCallback(
     (s: string): void => {
@@ -319,16 +319,40 @@ export default function AnalyticsMiniPanel() {
     [setPinned],
   );
 
-  // load last symbol from localStorage on mount
-  useEffect(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved && typeof saved === "string") {
-      setSymbol(saved.toUpperCase());
-    }
-  }, []);
-
   // Centralized backend base (adjust if your backend port changes)
   const backendBase = useMemo(() => "http://localhost:5046", []);
+
+  // English: always resolve user input (name or symbol-ish) to a TICKER via backend search
+  const resolveToTicker = useCallback(
+    async (input: string): Promise<string | null> => {
+      const q = (input ?? "").trim();
+      if (!q) return null;
+
+      try {
+        const resp = await fetch(
+          `${backendBase}/api/companies?q=${encodeURIComponent(q)}&limit=1`,
+          { headers: { Accept: "application/json" } },
+        );
+        if (!resp.ok) return null;
+
+        const arr = (await resp.json()) as Array<{ symbol?: string }>;
+        const sym = Array.isArray(arr) && arr.length > 0 ? arr[0]?.symbol : undefined;
+        return sym ? String(sym).toUpperCase() : null;
+      } catch {
+        return null; // English: best-effort; no fallback guess here
+      }
+    },
+    [backendBase],
+  );
+
+  // English: add current selection to pinned, always as a TICKER symbol
+  const pinAddCurrent = useCallback(async (): Promise<void> => {
+    // English: try resolving from current input; if that fails, fall back to currentSym
+    const resolved = (await resolveToTicker(symbol)) ?? currentSym;
+    if (!resolved) return;
+
+    setPinned((prev) => (prev.includes(resolved) ? prev : [...prev, resolved]));
+  }, [symbol, currentSym, resolveToTicker, setPinned]);
 
   // English: auto-hide all error pills after 5s (status lines stay)
   useEffect(() => {
@@ -386,330 +410,335 @@ export default function AnalyticsMiniPanel() {
     sections.reduce((sum, sec) => sum + sec.items.filter((i) => i.value === "n/a").length, 0) >= 6;
 
   // --- Main load routine (your existing body kept intact) ---
-  const load = useCallback(async () => {
-    const sym = symbol.trim().toUpperCase();
-    localStorage.setItem(STORAGE_KEY, sym);
-    if (!sym) return;
+  const load = useCallback(
+    async (symOverride?: string) => {
+      const sym = (symOverride ?? symbol).trim().toUpperCase(); // English: prefer explicit symbol if provided
+      localStorage.setItem(STORAGE_KEY, sym);
+      if (!sym) return;
 
-    setLoading(true);
-    setErr(null);
+      setLoading(true);
+      setErr(null);
 
-    // English: reset live delta when starting a fresh load
-    setLive(null);
-    setBaseClose(null);
-
-    try {
-      // 1) Latest price (already) …
-      const price = await getLatestCloseFromQuotes(sym);
-
-      // English: store base close for later live delta calculation
-      setBaseClose(price.value ?? null);
-
-      // 1b) Load timeseries (last 180 days) for sparkline
-      const to = new Date();
-      const from = new Date();
-      from.setDate(to.getDate() - 180);
+      // English: reset live delta when starting a fresh load
+      setLive(null);
+      setBaseClose(null);
 
       try {
-        const tsResp = await fetch(
-          `${backendBase}/api/quotes/timeseries?symbol=${encodeURIComponent(sym)}&from=${fmt(from)}&to=${fmt(to)}`,
-          { headers: { Accept: "application/json" } },
-        );
+        // 1) Latest price (already) …
+        const price = await getLatestCloseFromQuotes(sym);
 
-        if (tsResp.ok) {
-          const raw = (await tsResp.json()) as unknown;
-          const arr = Array.isArray(raw) ? raw : [];
-          // Defensive parse
-          const pts: TimeseriesPoint[] = arr
-            .map((r: unknown) => {
-              if (typeof r === "object" && r !== null) {
-                const obj = r as Record<string, unknown>;
-                return {
-                  date: String(obj.date ?? ""),
-                  close: typeof obj.close === "number" ? obj.close : NaN,
-                };
-              }
-              return { date: "", close: NaN };
-            })
-            .filter((p) => Number.isFinite(p.close));
+        // English: store base close for later live delta calculation
+        setBaseClose(price.value ?? null);
 
-          // Ensure chronological
-          pts.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
-          setSpark(pts);
-        } else {
+        // 1b) Load timeseries (last 180 days) for sparkline
+        const to = new Date();
+        const from = new Date();
+        from.setDate(to.getDate() - 180);
+
+        try {
+          const tsResp = await fetch(
+            `${backendBase}/api/quotes/timeseries?symbol=${encodeURIComponent(sym)}&from=${fmt(from)}&to=${fmt(to)}`,
+            { headers: { Accept: "application/json" } },
+          );
+
+          if (tsResp.ok) {
+            const raw = (await tsResp.json()) as unknown;
+            const arr = Array.isArray(raw) ? raw : [];
+            // Defensive parse
+            const pts: TimeseriesPoint[] = arr
+              .map((r: unknown) => {
+                if (typeof r === "object" && r !== null) {
+                  const obj = r as Record<string, unknown>;
+                  return {
+                    date: String(obj.date ?? ""),
+                    close: typeof obj.close === "number" ? obj.close : NaN,
+                  };
+                }
+                return { date: "", close: NaN };
+              })
+              .filter((p) => Number.isFinite(p.close));
+
+            // Ensure chronological
+            pts.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+            setSpark(pts);
+          } else {
+            setSpark([]);
+          }
+        } catch {
           setSpark([]);
         }
-      } catch {
-        setSpark([]);
-      }
 
-      // 2) Fetch all other analytics metrics in parallel
-      const [
-        peRes,
-        roeRes,
-        fcfYieldRes,
-        netMarginRes,
-        dteRes,
-        eqRatioRes,
-        roaRes,
-        dtaRes,
-        epsRes,
-        bvpsRes,
-        pbRes,
-        atRes,
-        cagrRes,
-        fcfAbsRes,
-        oeRes,
-        oeYieldRes,
-        oepsRes,
-        pToOeRes,
-        fcfMarginRes,
-      ] = await Promise.all([
-        fetchMetricNumber(backendBase, "/api/analytics/pe", sym, ["value", "pe"]),
-        fetchMetricNumber(backendBase, "/api/analytics/roe", sym, ["value", "roe"]),
-        fetchMetricNumber(backendBase, "/api/analytics/fcf-yield", sym, ["value", "fcfYield"]),
-        fetchMetricNumber(backendBase, "/api/analytics/net-margin", sym, ["value", "netMargin"]),
-        fetchMetricNumber(backendBase, "/api/analytics/debt-to-equity", sym, [
-          "value",
-          "debtToEquity",
-        ]),
-        fetchMetricNumber(backendBase, "/api/analytics/equity-ratio", sym, [
-          "value",
-          "equityRatio",
-        ]),
-        fetchMetricNumber(backendBase, "/api/analytics/roa", sym, ["value", "roa"]),
-        fetchMetricNumber(backendBase, "/api/analytics/debt-to-assets", sym, [
-          "value",
-          "debtToAssets",
-        ]),
-        fetchMetricNumber(backendBase, "/api/analytics/eps", sym, ["value", "eps"]),
-        fetchMetricNumber(backendBase, "/api/analytics/bvps", sym, ["value", "bvps"]),
-        fetchMetricNumber(backendBase, "/api/analytics/pb", sym, ["value", "pb"]),
-        fetchMetricNumber(backendBase, "/api/analytics/asset-turnover", sym, [
-          "value",
-          "assetTurnover",
-        ]),
-        fetchMetricNumber(backendBase, "/api/analytics/equity-cagr", sym, [
-          "value",
-          "cagr",
-          "equityCagr",
-        ]),
-        fetchMetricNumber(backendBase, "/api/analytics/fcf", sym, ["value", "fcf"]),
-        fetchMetricNumber(backendBase, "/api/analytics/owner-earnings", sym, [
-          "value",
-          "ownerEarnings",
-        ]),
-        fetchMetricNumber(backendBase, "/api/analytics/owner-earnings-yield", sym, [
-          "value",
-          "ownerEarningsYield",
-        ]),
-        fetchMetricNumber(backendBase, "/api/analytics/oeps", sym, ["value", "oeps"]),
-        fetchMetricNumber(backendBase, "/api/analytics/p-to-oe", sym, [
-          "value",
-          "pToOe",
-          "pOverOe",
-        ]),
-        fetchMetricNumber(backendBase, "/api/analytics/fcf-margin", sym, ["value", "fcfMargin"]),
-      ]);
+        // 2) Fetch all other analytics metrics in parallel
+        const [
+          peRes,
+          roeRes,
+          fcfYieldRes,
+          netMarginRes,
+          dteRes,
+          eqRatioRes,
+          roaRes,
+          dtaRes,
+          epsRes,
+          bvpsRes,
+          pbRes,
+          atRes,
+          cagrRes,
+          fcfAbsRes,
+          oeRes,
+          oeYieldRes,
+          oepsRes,
+          pToOeRes,
+          fcfMarginRes,
+        ] = await Promise.all([
+          fetchMetricNumber(backendBase, "/api/analytics/pe", sym, ["value", "pe"]),
+          fetchMetricNumber(backendBase, "/api/analytics/roe", sym, ["value", "roe"]),
+          fetchMetricNumber(backendBase, "/api/analytics/fcf-yield", sym, ["value", "fcfYield"]),
+          fetchMetricNumber(backendBase, "/api/analytics/net-margin", sym, ["value", "netMargin"]),
+          fetchMetricNumber(backendBase, "/api/analytics/debt-to-equity", sym, [
+            "value",
+            "debtToEquity",
+          ]),
+          fetchMetricNumber(backendBase, "/api/analytics/equity-ratio", sym, [
+            "value",
+            "equityRatio",
+          ]),
+          fetchMetricNumber(backendBase, "/api/analytics/roa", sym, ["value", "roa"]),
+          fetchMetricNumber(backendBase, "/api/analytics/debt-to-assets", sym, [
+            "value",
+            "debtToAssets",
+          ]),
+          fetchMetricNumber(backendBase, "/api/analytics/eps", sym, ["value", "eps"]),
+          fetchMetricNumber(backendBase, "/api/analytics/bvps", sym, ["value", "bvps"]),
+          fetchMetricNumber(backendBase, "/api/analytics/pb", sym, ["value", "pb"]),
+          fetchMetricNumber(backendBase, "/api/analytics/asset-turnover", sym, [
+            "value",
+            "assetTurnover",
+          ]),
+          fetchMetricNumber(backendBase, "/api/analytics/equity-cagr", sym, [
+            "value",
+            "cagr",
+            "equityCagr",
+          ]),
+          fetchMetricNumber(backendBase, "/api/analytics/fcf", sym, ["value", "fcf"]),
+          fetchMetricNumber(backendBase, "/api/analytics/owner-earnings", sym, [
+            "value",
+            "ownerEarnings",
+          ]),
+          fetchMetricNumber(backendBase, "/api/analytics/owner-earnings-yield", sym, [
+            "value",
+            "ownerEarningsYield",
+          ]),
+          fetchMetricNumber(backendBase, "/api/analytics/oeps", sym, ["value", "oeps"]),
+          fetchMetricNumber(backendBase, "/api/analytics/p-to-oe", sym, [
+            "value",
+            "pToOe",
+            "pOverOe",
+          ]),
+          fetchMetricNumber(backendBase, "/api/analytics/fcf-margin", sym, ["value", "fcfMargin"]),
+        ]);
 
-      // English: fallback via stable snapshot if analytics endpoints had no data
-      let peValue = peRes.value;
-      let peHint = peRes.status === 200 ? undefined : `HTTP ${peRes.status}`;
+        // English: fallback via stable snapshot if analytics endpoints had no data
+        let peValue = peRes.value;
+        let peHint = peRes.status === 200 ? undefined : `HTTP ${peRes.status}`;
 
-      let netMarginValue = netMarginRes.value;
-      let netMarginHint = netMarginRes.status === 200 ? undefined : `HTTP ${netMarginRes.status}`;
+        let netMarginValue = netMarginRes.value;
+        let netMarginHint = netMarginRes.status === 200 ? undefined : `HTTP ${netMarginRes.status}`;
 
-      if (peRes.status !== 200 || netMarginRes.status !== 200) {
-        // English: prefer already-fetched snapshot from state to avoid extra call
-        let snapshot = fundRes?.status === 200 ? fundRes.data : null;
+        if (peRes.status !== 200 || netMarginRes.status !== 200) {
+          // English: prefer already-fetched snapshot from state to avoid extra call
+          let snapshot = fundRes?.status === 200 ? fundRes.data : null;
 
-        // If not present, fetch minimal snapshot (limit=1) with robust routing
-        if (!snapshot) {
-          const snap = await fetchFundamentalsSnapshot(sym, "annual", 1);
-          if (snap.status !== 200) {
-            setErr((prev) => prev ?? `Fundamentals snapshot fallback failed (HTTP ${snap.status})`);
+          // If not present, fetch minimal snapshot (limit=1) with robust routing
+          if (!snapshot) {
+            const snap = await fetchFundamentalsSnapshot(sym, "annual", 1);
+            if (snap.status !== 200) {
+              setErr(
+                (prev) => prev ?? `Fundamentals snapshot fallback failed (HTTP ${snap.status})`,
+              );
+            }
+            snapshot = snap.data ?? null;
           }
-          snapshot = snap.data ?? null;
-        }
 
-        if (snapshot?.metrics) {
-          const m = snapshot.metrics as Record<string, unknown>;
-          const num = (k: string): number | null => {
-            const v = m[k];
-            return typeof v === "number" && Number.isFinite(v) ? v : null;
-          };
+          if (snapshot?.metrics) {
+            const m = snapshot.metrics as Record<string, unknown>;
+            const num = (k: string): number | null => {
+              const v = m[k];
+              return typeof v === "number" && Number.isFinite(v) ? v : null;
+            };
 
-          if (peRes.status !== 200) {
-            const peTtm = num("peRatioTTM") ?? num("peTTM") ?? num("pe");
-            if (peTtm != null) {
-              peValue = peTtm;
-              peHint = "from TTM (snapshot)";
+            if (peRes.status !== 200) {
+              const peTtm = num("peRatioTTM") ?? num("peTTM") ?? num("pe");
+              if (peTtm != null) {
+                peValue = peTtm;
+                peHint = "from TTM (snapshot)";
+              }
+            }
+
+            if (netMarginRes.status !== 200) {
+              const nmTtm = num("netProfitMarginTTM") ?? num("netMarginTTM") ?? num("netMargin");
+              if (nmTtm != null) {
+                netMarginValue = nmTtm;
+                netMarginHint = "from TTM (snapshot)";
+              }
             }
           }
-
-          if (netMarginRes.status !== 200) {
-            const nmTtm = num("netProfitMarginTTM") ?? num("netMarginTTM") ?? num("netMargin");
-            if (nmTtm != null) {
-              netMarginValue = nmTtm;
-              netMarginHint = "from TTM (snapshot)";
-            }
-          }
         }
+
+        // Normalize UI sections (grouped)
+        const sectionsData: MetricSection[] = [
+          {
+            title: "Valuation",
+            items: [
+              {
+                label: "Price",
+                value:
+                  price.value != null
+                    ? `${price.value.toFixed(2)} ${price.unit ?? ""}`.trim()
+                    : "n/a",
+                hint:
+                  price.status === 200
+                    ? price.asOf
+                      ? `as of ${price.asOf}${price.adjusted ? " (adjusted)" : ""}`
+                      : undefined
+                    : `HTTP ${price.status}`,
+              },
+              { label: "P/E", value: peValue != null ? formatRatio(peValue) : "n/a", hint: peHint },
+              {
+                label: "P/B",
+                value: pbRes.value != null ? formatRatio(pbRes.value) : "n/a",
+                hint: pbRes.status === 200 ? undefined : `HTTP ${pbRes.status}`,
+              },
+              {
+                label: "P/OE",
+                value: pToOeRes.value != null ? formatRatio(pToOeRes.value) : "n/a",
+                hint: pToOeRes.status === 200 ? undefined : `HTTP ${pToOeRes.status}`,
+              },
+            ],
+          },
+          {
+            title: "Profitability",
+            items: [
+              {
+                label: "ROE",
+                value: formatPercent(roeRes.value),
+                hint: roeRes.status === 200 ? undefined : `HTTP ${roeRes.status}`,
+              },
+              {
+                label: "ROA",
+                value: formatPercent(roaRes.value),
+                hint: roaRes.status === 200 ? undefined : `HTTP ${roaRes.status}`,
+              },
+              {
+                label: "Net Margin",
+                value: netMarginValue != null ? `${(netMarginValue * 100).toFixed(1)}%` : "n/a",
+                hint: netMarginHint,
+              },
+              {
+                label: "FCF Yield",
+                value: formatPercent(fcfYieldRes.value),
+                hint: fcfYieldRes.status === 200 ? undefined : `HTTP ${fcfYieldRes.status}`,
+              },
+              {
+                label: "FCF Margin",
+                value: formatPercent(fcfMarginRes.value),
+                hint: fcfMarginRes.status === 200 ? undefined : `HTTP ${fcfMarginRes.status}`,
+              },
+              {
+                label: "OE Yield",
+                value: formatPercent(oeYieldRes.value),
+                hint: oeYieldRes.status === 200 ? undefined : `HTTP ${oeYieldRes.status}`,
+              },
+            ],
+          },
+          {
+            title: "Solvency / Leverage",
+            items: [
+              {
+                label: "Debt/Equity",
+                value: dteRes.value != null ? formatRatio(dteRes.value) : "n/a",
+                hint: dteRes.status === 200 ? undefined : `HTTP ${dteRes.status}`,
+              },
+              {
+                label: "Debt/Assets",
+                value: formatPercent(dtaRes.value),
+                hint: dtaRes.status === 200 ? undefined : `HTTP ${dtaRes.status}`,
+              },
+              {
+                label: "Equity Ratio",
+                value: formatPercent(eqRatioRes.value),
+                hint: eqRatioRes.status === 200 ? undefined : `HTTP ${eqRatioRes.status}`,
+              },
+            ],
+          },
+          {
+            title: "Efficiency & Growth",
+            items: [
+              {
+                label: "Asset Turnover",
+                value: atRes.value != null ? formatRatio(atRes.value) : "n/a",
+                hint: atRes.status === 200 ? undefined : `HTTP ${atRes.status}`,
+              },
+              {
+                label: "Equity CAGR",
+                value: formatPercent(cagrRes.value),
+                hint: cagrRes.status === 200 ? undefined : `HTTP ${cagrRes.status}`,
+              },
+            ],
+          },
+          {
+            title: "Per Share",
+            items: [
+              {
+                label: "EPS",
+                value: epsRes.value != null ? formatPerShare(epsRes.value, price.unit) : "n/a",
+                hint: epsRes.status === 200 ? undefined : `HTTP ${epsRes.status}`,
+              },
+              {
+                label: "BVPS",
+                value: bvpsRes.value != null ? formatPerShare(bvpsRes.value, price.unit) : "n/a",
+                hint: bvpsRes.status === 200 ? undefined : `HTTP ${bvpsRes.status}`,
+              },
+              {
+                label: "OEPS",
+                value: oepsRes.value != null ? formatPerShare(oepsRes.value, price.unit) : "n/a",
+                hint: oepsRes.status === 200 ? undefined : `HTTP ${oepsRes.status}`,
+              },
+            ],
+          },
+          {
+            title: "Cash Flow & Owner Earnings",
+            items: [
+              {
+                label: "FCF (abs)",
+                value:
+                  fcfAbsRes.value != null
+                    ? `${formatCompactNumber(fcfAbsRes.value)} ${price.unit ?? "USD"}`
+                    : "n/a",
+                hint: fcfAbsRes.status === 200 ? undefined : `HTTP ${fcfAbsRes.status}`,
+              },
+              {
+                label: "Owner Earnings",
+                value:
+                  oeRes.value != null
+                    ? `${formatCompactNumber(oeRes.value)} ${price.unit ?? "USD"}`
+                    : "n/a",
+                hint: oeRes.status === 200 ? undefined : `HTTP ${oeRes.status}`,
+              },
+            ],
+          },
+        ];
+
+        setSections(sectionsData);
+      } catch (e: unknown) {
+        console.error("[panel] load failed:", e);
+        setErr("Fehler beim Laden der Kennzahlen.");
+        setSections([]); // clear sections on error
+      } finally {
+        setLoading(false);
       }
-
-      // Normalize UI sections (grouped)
-      const sectionsData: MetricSection[] = [
-        {
-          title: "Valuation",
-          items: [
-            {
-              label: "Price",
-              value:
-                price.value != null
-                  ? `${price.value.toFixed(2)} ${price.unit ?? ""}`.trim()
-                  : "n/a",
-              hint:
-                price.status === 200
-                  ? price.asOf
-                    ? `as of ${price.asOf}${price.adjusted ? " (adjusted)" : ""}`
-                    : undefined
-                  : `HTTP ${price.status}`,
-            },
-            { label: "P/E", value: peValue != null ? formatRatio(peValue) : "n/a", hint: peHint },
-            {
-              label: "P/B",
-              value: pbRes.value != null ? formatRatio(pbRes.value) : "n/a",
-              hint: pbRes.status === 200 ? undefined : `HTTP ${pbRes.status}`,
-            },
-            {
-              label: "P/OE",
-              value: pToOeRes.value != null ? formatRatio(pToOeRes.value) : "n/a",
-              hint: pToOeRes.status === 200 ? undefined : `HTTP ${pToOeRes.status}`,
-            },
-          ],
-        },
-        {
-          title: "Profitability",
-          items: [
-            {
-              label: "ROE",
-              value: formatPercent(roeRes.value),
-              hint: roeRes.status === 200 ? undefined : `HTTP ${roeRes.status}`,
-            },
-            {
-              label: "ROA",
-              value: formatPercent(roaRes.value),
-              hint: roaRes.status === 200 ? undefined : `HTTP ${roaRes.status}`,
-            },
-            {
-              label: "Net Margin",
-              value: netMarginValue != null ? `${(netMarginValue * 100).toFixed(1)}%` : "n/a",
-              hint: netMarginHint,
-            },
-            {
-              label: "FCF Yield",
-              value: formatPercent(fcfYieldRes.value),
-              hint: fcfYieldRes.status === 200 ? undefined : `HTTP ${fcfYieldRes.status}`,
-            },
-            {
-              label: "FCF Margin",
-              value: formatPercent(fcfMarginRes.value),
-              hint: fcfMarginRes.status === 200 ? undefined : `HTTP ${fcfMarginRes.status}`,
-            },
-            {
-              label: "OE Yield",
-              value: formatPercent(oeYieldRes.value),
-              hint: oeYieldRes.status === 200 ? undefined : `HTTP ${oeYieldRes.status}`,
-            },
-          ],
-        },
-        {
-          title: "Solvency / Leverage",
-          items: [
-            {
-              label: "Debt/Equity",
-              value: dteRes.value != null ? formatRatio(dteRes.value) : "n/a",
-              hint: dteRes.status === 200 ? undefined : `HTTP ${dteRes.status}`,
-            },
-            {
-              label: "Debt/Assets",
-              value: formatPercent(dtaRes.value),
-              hint: dtaRes.status === 200 ? undefined : `HTTP ${dtaRes.status}`,
-            },
-            {
-              label: "Equity Ratio",
-              value: formatPercent(eqRatioRes.value),
-              hint: eqRatioRes.status === 200 ? undefined : `HTTP ${eqRatioRes.status}`,
-            },
-          ],
-        },
-        {
-          title: "Efficiency & Growth",
-          items: [
-            {
-              label: "Asset Turnover",
-              value: atRes.value != null ? formatRatio(atRes.value) : "n/a",
-              hint: atRes.status === 200 ? undefined : `HTTP ${atRes.status}`,
-            },
-            {
-              label: "Equity CAGR",
-              value: formatPercent(cagrRes.value),
-              hint: cagrRes.status === 200 ? undefined : `HTTP ${cagrRes.status}`,
-            },
-          ],
-        },
-        {
-          title: "Per Share",
-          items: [
-            {
-              label: "EPS",
-              value: epsRes.value != null ? formatPerShare(epsRes.value, price.unit) : "n/a",
-              hint: epsRes.status === 200 ? undefined : `HTTP ${epsRes.status}`,
-            },
-            {
-              label: "BVPS",
-              value: bvpsRes.value != null ? formatPerShare(bvpsRes.value, price.unit) : "n/a",
-              hint: bvpsRes.status === 200 ? undefined : `HTTP ${bvpsRes.status}`,
-            },
-            {
-              label: "OEPS",
-              value: oepsRes.value != null ? formatPerShare(oepsRes.value, price.unit) : "n/a",
-              hint: oepsRes.status === 200 ? undefined : `HTTP ${oepsRes.status}`,
-            },
-          ],
-        },
-        {
-          title: "Cash Flow & Owner Earnings",
-          items: [
-            {
-              label: "FCF (abs)",
-              value:
-                fcfAbsRes.value != null
-                  ? `${formatCompactNumber(fcfAbsRes.value)} ${price.unit ?? "USD"}`
-                  : "n/a",
-              hint: fcfAbsRes.status === 200 ? undefined : `HTTP ${fcfAbsRes.status}`,
-            },
-            {
-              label: "Owner Earnings",
-              value:
-                oeRes.value != null
-                  ? `${formatCompactNumber(oeRes.value)} ${price.unit ?? "USD"}`
-                  : "n/a",
-              hint: oeRes.status === 200 ? undefined : `HTTP ${oeRes.status}`,
-            },
-          ],
-        },
-      ];
-
-      setSections(sectionsData);
-    } catch (e: unknown) {
-      console.error("[panel] load failed:", e);
-      setErr("Fehler beim Laden der Kennzahlen.");
-      setSections([]); // clear sections on error
-    } finally {
-      setLoading(false);
-    }
-  }, [backendBase, symbol, fundRes]);
+    },
+    [backendBase, symbol, fundRes],
+  );
 
   // English: switch to a pinned symbol and trigger an immediate analytics load
   const pinSwitch = useCallback(
@@ -720,11 +749,49 @@ export default function AnalyticsMiniPanel() {
       resetActionUi(); // English: clear per-action UI for a fresh symbol view
       // English: defer load to next tick so state is applied before reading it
       setTimeout(() => {
-        load().catch((err) => console.warn("[pinned] load failed:", err));
+        load(sym).catch((err) => console.warn("[pinned] load failed:", err));
       }, 0);
     },
     [load, resetActionUi, setSymbol],
   );
+
+  // English: keep latest functions in refs so effects don't depend on them
+  const loadFnRef = useRef(load);
+  useEffect(() => {
+    loadFnRef.current = load;
+  }, [load]);
+
+  const resetFnRef = useRef(resetActionUi);
+  useEffect(() => {
+    resetFnRef.current = resetActionUi;
+  }, [resetActionUi]);
+
+  // English: adopt parent-provided symbol ONLY when the prop actually changes
+  const lastInitialSymRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const up = (initialSymbol ?? "").trim().toUpperCase();
+    if (!up) return;
+
+    if (lastInitialSymRef.current !== up) {
+      lastInitialSymRef.current = up;
+      setSymbol(up);
+      // English: call via refs to avoid useEffect deps on these callbacks
+      resetFnRef.current?.();
+      setTimeout(() => {
+        loadFnRef.current?.(up); // English: pass symbol explicitly to avoid races with state
+      }, 0);
+    }
+  }, [initialSymbol]);
+
+  // English: notify parent when the panel's active symbol changes (debounced to only changes)
+  const lastAnnouncedRef = useRef<string | null>(null);
+  useEffect(() => {
+    const s = currentSym;
+    if (!s || lastAnnouncedRef.current === s) return;
+    lastAnnouncedRef.current = s;
+    onSymbolChange?.(s);
+  }, [currentSym, onSymbolChange]);
 
   return (
     <div

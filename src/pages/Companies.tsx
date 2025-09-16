@@ -191,6 +191,19 @@ export default function Companies() {
   const [limit, setLimit] = useState<number>(25); // EN: adjustable server page size
   const [sectorFilter, setSectorFilter] = useState<string>("All"); // EN: Sector filter (All = no filter)
 
+  // English: selected symbol to show in the analytics panel
+  const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
+
+  // English: anchor to scroll the analytics panel into view (optional)
+  const analyticsRef = useRef<HTMLDivElement | null>(null);
+
+  // English: set clicked symbol; scrolling will be handled by an effect
+  const openAnalytics = (sym: string): void => {
+    const up = (sym ?? "").trim().toUpperCase();
+    if (!up) return;
+    setSelectedSymbol(up);
+  };
+
   // Ref for focusing the search input via keyboard shortcut
   const searchRef = useRef<HTMLInputElement>(null);
 
@@ -404,6 +417,34 @@ export default function Companies() {
       .sort((a, b) => b.count - a.count);
   }, [filteredItems]);
 
+  // English: on first load, open analytics for the first pinned ticker (if any)
+  useEffect(() => {
+    if (selectedSymbol) return; // already selected → do nothing
+    try {
+      const raw = localStorage.getItem("analytics:pinned");
+      if (!raw) return;
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr) && arr.length > 0) {
+        const first = String(arr[0]).toUpperCase();
+        if (first) setSelectedSymbol(first);
+      }
+    } catch (e) {
+      console.warn("[companies] read pinned failed:", e);
+    }
+  }, [selectedSymbol]);
+
+  // English: when a symbol is selected/changes, scroll its row into view
+  useEffect(() => {
+    if (!selectedSymbol) return;
+    // wait one frame so the row exists and highlight applied
+    requestAnimationFrame(() => {
+      const row = document.querySelector(
+        `tr[data-sym="${selectedSymbol.toUpperCase()}"]`,
+      ) as HTMLElement | null;
+      row?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  }, [selectedSymbol, sortedItems]);
+
   // --- Render states ---
   if (error) return <p style={{ color: "red" }}>Error: {error}</p>;
 
@@ -608,15 +649,56 @@ export default function Companies() {
                   const needsRefresh = !(c.name && c.name.trim()) || !(c.sector && c.sector.trim());
 
                   return (
-                    <tr key={c.id ?? `${c.symbol}-${idx}`}>
-                      <td style={{ ...styles.td, ...styles.mono }}>{c.symbol ?? "—"}</td>
+                    <tr
+                      key={c.id ?? `${c.symbol}-${idx}`}
+                      data-sym={sym} // ← add this
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => sym && openAnalytics(sym)}
+                      onKeyDown={(e) => {
+                        if ((e.key === "Enter" || e.key === " ") && sym) openAnalytics(sym);
+                      }}
+                      aria-selected={selectedSymbol?.toUpperCase() === sym || undefined}
+                      style={{
+                        cursor: sym ? "pointer" : "default",
+                        ...(selectedSymbol?.toUpperCase() === sym
+                          ? { outline: "1px solid #555", background: "rgba(255,255,255,0.03)" }
+                          : {}),
+                      }}
+                    >
+                      <td style={{ ...styles.td, ...styles.mono }}>
+                        {sym ? (
+                          <button
+                            type="button"
+                            onClick={() => openAnalytics(sym)}
+                            onKeyDown={(e) => {
+                              // English: keyboard accessible (Enter/Space)
+                              if (e.key === "Enter" || e.key === " ") openAnalytics(sym);
+                            }}
+                            title={`Open ${sym} analytics below`}
+                            // English: make button look like plain text
+                            style={{ all: "unset", cursor: "pointer", color: "inherit" }}
+                            aria-label={`Open ${sym} analytics`}
+                          >
+                            <strong>{sym}</strong>
+                          </button>
+                        ) : (
+                          "—"
+                        )}
+                      </td>
                       <td style={styles.td}>{safeName}</td>
                       <td style={styles.td}>{c.sector ?? "—"}</td>
                       <td style={styles.tdRight}>
                         {needsRefresh ? (
                           <button
                             disabled={!sym || isBusy}
-                            onClick={() => refreshProfile(sym)}
+                            onClick={(e) => {
+                              e.stopPropagation(); // English: prevent row click
+                              refreshProfile(sym);
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" || e.key === " ") e.stopPropagation();
+                            }}
                             title="Fetch name & sector from FMP and store in the database"
                             style={{
                               ...styles.btn,
@@ -651,10 +733,18 @@ export default function Companies() {
         </div>
       )}
 
-      {/* English comment: a tiny analytics panel (symbol -> price + P/E) */}
-      <div style={{ marginBottom: 12 }}>
-        <AnalyticsMiniPanel />
-      </div>
+      {/* English: in-page analytics anchor (always present) */}
+      <div ref={analyticsRef} style={{ marginTop: 12 }} />
+
+      {/* English: render the panel only when a symbol is selected */}
+      {selectedSymbol && (
+        <div style={{ marginTop: 8 }}>
+          <AnalyticsMiniPanel
+            initialSymbol={selectedSymbol}
+            onSymbolChange={setSelectedSymbol} // ← sync zurück zur Liste
+          />
+        </div>
+      )}
 
       {/* Chart card: Companies per Sector (only if we have at least 2 sectors) */}
       {sectorData.length >= 2 && (

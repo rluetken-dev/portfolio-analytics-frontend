@@ -251,7 +251,7 @@ export default function AnalyticsMiniPanel({
   onSymbolChange?: (s: string) => void;
 }) {
   // --- Core query & global UI state ---
-  const [symbol, setSymbol] = useState(initialSymbol ?? "AAPL");
+  const [symbol, setSymbol] = useState<string>("");
 
   // English: normalized symbol (must be declared early so helpers can use it)
   const currentSym = useMemo(() => symbol.trim().toUpperCase(), [symbol]);
@@ -301,6 +301,16 @@ export default function AnalyticsMiniPanel({
     }
     return ["AAPL", "AMD"];
   });
+
+  const [confirmedSym, setConfirmedSym] = useState<string>("");
+
+  const typingRef = useRef(false); // English: blocks auto-load while user is editing
+
+  const searchRef = useRef<HTMLInputElement | null>(null); // English: track input element to detect focus
+
+  const lastAnnouncedRef = useRef<string | null>(null);
+
+  const lastInitialSymRef = useRef<string | null>(null); // English: remember last adopted initialSymbol to avoid duplicates
 
   // English: persist pinned list on change
   useEffect(() => {
@@ -415,6 +425,9 @@ export default function AnalyticsMiniPanel({
       const sym = (symOverride ?? symbol).trim().toUpperCase(); // English: prefer explicit symbol if provided
       localStorage.setItem(STORAGE_KEY, sym);
       if (!sym) return;
+
+      // English: Do not load if user is currently typing in the search box
+      if (typingRef.current) return;
 
       setLoading(true);
       setErr(null);
@@ -743,11 +756,14 @@ export default function AnalyticsMiniPanel({
   // English: switch to a pinned symbol and trigger an immediate analytics load
   const pinSwitch = useCallback(
     (s: string): void => {
-      const sym = (s ?? "").trim().toUpperCase();
+      const sym = (s ?? "").trim();
       if (!sym) return;
+
+      typingRef.current = false; // English: allow immediate load from pin
+
       setSymbol(sym);
+      setConfirmedSym(sym);
       resetActionUi(); // English: clear per-action UI for a fresh symbol view
-      // English: defer load to next tick so state is applied before reading it
       setTimeout(() => {
         load(sym).catch((err) => console.warn("[pinned] load failed:", err));
       }, 0);
@@ -766,32 +782,113 @@ export default function AnalyticsMiniPanel({
     resetFnRef.current = resetActionUi;
   }, [resetActionUi]);
 
-  // English: adopt parent-provided symbol ONLY when the prop actually changes
-  const lastInitialSymRef = useRef<string | null>(null);
-
+  // English: Skip the very first non-empty initialSymbol from parent (no preselection on startup)
+  const skipFirstAdoptionRef = useRef(false);
   useEffect(() => {
     const up = (initialSymbol ?? "").trim().toUpperCase();
     if (!up) return;
 
-    if (lastInitialSymRef.current !== up) {
-      lastInitialSymRef.current = up;
-      setSymbol(up);
-      // English: call via refs to avoid useEffect deps on these callbacks
-      resetFnRef.current?.();
-      setTimeout(() => {
-        loadFnRef.current?.(up); // English: pass symbol explicitly to avoid races with state
-      }, 0);
+    if (up === confirmedRef.current) return; // English: ignore parent echo of the already confirmed pin
+
+    if (skipFirstAdoptionRef.current) {
+      skipFirstAdoptionRef.current = false; // English: ignore the very first non-empty
+      lastInitialSymRef.current = up; // English: mark as seen so repeats won't adopt
+      return; // do not adopt/search-field-fill on initial startup
     }
+
+    const inputFocused = searchRef.current != null && document.activeElement === searchRef.current;
+
+    if (!inputFocused) {
+      setSymbol(up); // English: reflect list click in the search field
+    }
+
+    resetFnRef.current?.(); // English: clear per-action UI
+    typingRef.current = true; // English: wait for explicit Load
+    setSections([]); // English: hide analytics panels
+    setSpark([]); // English: hide sparkline
+    setConfirmedSym(""); // English: not confirmed yet
+
+    // English: do NOT auto-load here; user must confirm with Load
   }, [initialSymbol]);
 
-  // English: notify parent when the panel's active symbol changes (debounced to only changes)
-  const lastAnnouncedRef = useRef<string | null>(null);
+  // English: resolve query to a UNIQUE ticker; returns null if 0 or >1 matches
+  const resolveUniqueTicker = useCallback(
+    async (query: string): Promise<string | null> => {
+      const q = (query ?? "").trim();
+      if (!q) return null;
+
+      try {
+        // Ask backend for up to 2 hits; only accept when we get exactly 1
+        const resp = await fetch(
+          `${backendBase}/api/companies?q=${encodeURIComponent(q)}&limit=2`,
+          { headers: { Accept: "application/json" } },
+        );
+        if (!resp.ok) return null;
+
+        const arr = (await resp.json()) as Array<{ symbol?: string }>;
+        if (!Array.isArray(arr)) return null;
+
+        if (arr.length === 1 && arr[0]?.symbol) {
+          return String(arr[0].symbol).toUpperCase();
+        }
+        return null; // ambiguous or not found
+      } catch {
+        return null; // best-effort
+      }
+    },
+    [backendBase],
+  );
+
+  // English: try to resolve input to a unique ticker; load it, or clear selection if ambiguous
+  const handleResolveAndLoad = useCallback(async (): Promise<void> => {
+    const sym = await resolveUniqueTicker(symbol);
+    if (sym) {
+      setSymbol(sym); // show resolved ticker in the input
+      resetActionUi(); // clear previous per-action UI
+      //onSymbolChange?.(sym); // reflect selection in parent (highlight/scroll)
+      typingRef.current = false; // English: explicit submit -> allow loading now
+      await load(sym); // load analytics for the resolved ticker
+      setConfirmedSym(sym);
+    } else {
+      // No unique match: act as if nothing is selected
+      resetActionUi();
+      setSections([]);
+      setSpark([]);
+      onSymbolChange?.(""); // tell parent to clear selection (hides panel highlight)
+    }
+  }, [
+    symbol,
+    resolveUniqueTicker,
+    resetActionUi,
+    load,
+    onSymbolChange,
+    setSections,
+    setSpark,
+    setSymbol,
+  ]);
+
   useEffect(() => {
-    const s = currentSym;
+    typingRef.current = true; // block any auto-load until user confirms
+    setSections([]); // hide analytics panels
+    setSpark([]); // hide sparkline
+  }, []);
+
+  useEffect(() => {
+    const s = confirmedSym;
     if (!s || lastAnnouncedRef.current === s) return;
     lastAnnouncedRef.current = s;
-    onSymbolChange?.(s);
-  }, [currentSym, onSymbolChange]);
+
+    const id = requestAnimationFrame(() => {
+      onSymbolChange?.(s); // Parent sync happens AFTER the highlight was painted
+    });
+
+    return () => cancelAnimationFrame(id);
+  }, [confirmedSym, onSymbolChange]);
+
+  const confirmedRef = useRef<string>(""); // English: mirror of confirmedSym for effects that must not re-run
+  useEffect(() => {
+    confirmedRef.current = confirmedSym; // English: keep ref in sync with state
+  }, [confirmedSym]);
 
   return (
     <div
@@ -822,7 +919,7 @@ export default function AnalyticsMiniPanel({
               border: "1px solid #333",
               borderRadius: 999,
               padding: "2px 6px",
-              background: s === currentSym ? "#111" : "transparent",
+              background: s === confirmedSym ? "#111" : "transparent",
             }}
             title={`Switch to ${s}`}
           >
@@ -880,17 +977,27 @@ export default function AnalyticsMiniPanel({
       {/* English: Search bar + button */}
       <div style={{ display: "flex", gap: 8 }}>
         <input
+          ref={searchRef} // English: needed to know if input is focused
           value={symbol}
-          onChange={(e) => setSymbol(e.target.value)}
-          onKeyDown={(e) => {
+          onKeyDown={async (e) => {
             if (e.key === "Enter" && !loading) {
               e.preventDefault();
-              // English: clear per-action UI and load analytics for the current symbol
-              resetActionUi();
-              void load();
+              await handleResolveAndLoad(); // English: resolve unique + load or clear
             }
           }}
-          placeholder="Symbol (e.g., AAPL)"
+          onChange={(e) => {
+            const v = e.target.value;
+            setSymbol(v); // English: keep raw typing in state (no normalization)
+            typingRef.current = true; // English: user started typing -> block auto-loads
+            setConfirmedSym("");
+            resetActionUi();
+            setSections([]);
+            setSpark([]);
+          }}
+          placeholder="Symbol or name (e.g., AMZN or Amazon)"
+          autoCapitalize="off"
+          autoCorrect="off"
+          spellCheck={false}
           style={{
             flex: 1,
             padding: "8px 10px",
@@ -898,14 +1005,14 @@ export default function AnalyticsMiniPanel({
             border: "1px solid #333",
             background: "transparent",
             color: "inherit",
+            textTransform: "none", // English: ensure input preserves typed casing
+            fontVariantCaps: "normal", // English: avoid small-caps or other cap variants
           }}
         />
         <button
           onClick={async () => {
             if (loading) return;
-            // English: clear per-action UI and load analytics for the current symbol
-            resetActionUi();
-            await load();
+            await handleResolveAndLoad(); // English: same logic as Enter key
           }}
           disabled={loading}
           style={{

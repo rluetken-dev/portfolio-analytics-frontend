@@ -192,7 +192,7 @@ export default function Companies() {
   const [sectorFilter, setSectorFilter] = useState<string>("All"); // EN: Sector filter (All = no filter)
 
   // English: selected symbol to show in the analytics panel
-  const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
+  const [selectedSymbol, setSelectedSymbol] = useState<string>(""); // English: start empty
 
   // English: anchor to scroll the analytics panel into view (optional)
   const analyticsRef = useRef<HTMLDivElement | null>(null);
@@ -416,22 +416,6 @@ export default function Companies() {
       .map(([sector, count]) => ({ sector, count }))
       .sort((a, b) => b.count - a.count);
   }, [filteredItems]);
-
-  // English: on first load, open analytics for the first pinned ticker (if any)
-  useEffect(() => {
-    if (selectedSymbol) return; // already selected → do nothing
-    try {
-      const raw = localStorage.getItem("analytics:pinned");
-      if (!raw) return;
-      const arr = JSON.parse(raw);
-      if (Array.isArray(arr) && arr.length > 0) {
-        const first = String(arr[0]).toUpperCase();
-        if (first) setSelectedSymbol(first);
-      }
-    } catch (e) {
-      console.warn("[companies] read pinned failed:", e);
-    }
-  }, [selectedSymbol]);
 
   // English: when a symbol is selected/changes, scroll its row into view
   useEffect(() => {
@@ -737,14 +721,9 @@ export default function Companies() {
       <div ref={analyticsRef} style={{ marginTop: 12 }} />
 
       {/* English: render the panel only when a symbol is selected */}
-      {selectedSymbol && (
-        <div style={{ marginTop: 8 }}>
-          <AnalyticsMiniPanel
-            initialSymbol={selectedSymbol}
-            onSymbolChange={setSelectedSymbol} // ← sync zurück zur Liste
-          />
-        </div>
-      )}
+      <div style={{ marginTop: 8 }}>
+        <AnalyticsMiniPanel initialSymbol={selectedSymbol} onSymbolChange={setSelectedSymbol} />
+      </div>
 
       {/* Chart card: Companies per Sector (only if we have at least 2 sectors) */}
       {sectorData.length >= 2 && (

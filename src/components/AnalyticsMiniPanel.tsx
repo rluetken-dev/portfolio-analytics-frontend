@@ -415,6 +415,19 @@ export default function AnalyticsMiniPanel({
     setSections([]);
   }, [resetActionUi, currentSym]);
 
+  // English: clear input + UI state and tell parent to deselect
+  const handleClear = useCallback((): void => {
+    typingRef.current = true; // English: block any auto-load
+    setSymbol(""); // English: empty the search field
+    setConfirmedSym(""); // English: no confirmed selection
+    resetActionUi(); // English: clear per-action UI
+    setSections([]); // English: hide analytics panels
+    setSpark([]); // English: hide sparkline
+    onSymbolChange?.(""); // English: tell parent to clear list/pin highlight
+    // optional: focus back to input for quick typing
+    searchRef.current?.focus();
+  }, [resetActionUi, onSymbolChange]);
+
   // English: show fundamentals CTAs only when many metrics are missing
   const manyNa =
     sections.reduce((sum, sec) => sum + sec.items.filter((i) => i.value === "n/a").length, 0) >= 6;
@@ -1009,6 +1022,23 @@ export default function AnalyticsMiniPanel({
             fontVariantCaps: "normal", // English: avoid small-caps or other cap variants
           }}
         />
+        {/* English: clear current query and UI */}
+        <button
+          onClick={handleClear}
+          title="Clear search"
+          aria-label="Clear search"
+          style={{
+            padding: "8px 10px",
+            borderRadius: 10,
+            border: "1px solid #333",
+            background: "transparent",
+            cursor: "pointer",
+            whiteSpace: "nowrap",
+          }}
+        >
+          ×
+        </button>
+
         <button
           onClick={async () => {
             if (loading) return;

@@ -8,6 +8,7 @@ import About from "./pages/About";
 import Health from "./pages/Health";
 import NotFound from "./pages/NotFound";
 import Companies from "./pages/Companies";
+import CompanyPage from "./pages/Company";
 
 // Import components
 import NavBar from "./components/NavBar";
@@ -29,6 +30,8 @@ function App() {
         <Route path="/health" element={<Health />} />
         <Route path="*" element={<NotFound />} />
         <Route path="/companies" element={<Companies />} />
+        <Route path="/company/:symbol" element={<CompanyPage />} />
+        <Route path="*" element={<Companies />} />
       </Routes>
     </div>
   );

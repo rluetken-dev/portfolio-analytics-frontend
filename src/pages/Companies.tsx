@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import type { CSSProperties } from "react";
 import { fetchJson } from "../services/api/client";
 import { Tooltip, ResponsiveContainer, Cell, PieChart, Pie } from "recharts";
+import { useNavigate } from "react-router-dom";
 
 // English comment: add the small analytics panel component
 import AnalyticsMiniPanel from "../components/AnalyticsMiniPanel";
@@ -417,6 +418,8 @@ export default function Companies() {
       .sort((a, b) => b.count - a.count);
   }, [filteredItems]);
 
+  const navigate = useNavigate(); // imperative navigation handler
+
   // English: when a symbol is selected/changes, scroll its row into view
   useEffect(() => {
     if (!selectedSymbol) return;
@@ -624,28 +627,30 @@ export default function Companies() {
               </thead>
               <tbody>
                 {sortedItems.map((c, idx) => {
-                  // EN: Avoid duplicate symbol/name → show em dash if identical or empty
+                  // Avoid duplicate symbol/name → show em dash if identical or empty
                   const safeName = c.name && c.name !== c.symbol ? c.name : "—";
-                  const sym = c.symbol ?? "";
+                  const sym = String(c.symbol ?? "").toUpperCase(); // normalize once for stable comparisons
                   const isBusy = !!refreshing[sym];
 
-                  // EN: Show the refresh button only if profile data is incomplete.
+                  // Show the refresh button only if profile data is incomplete.
                   const needsRefresh = !(c.name && c.name.trim()) || !(c.sector && c.sector.trim());
+
+                  const isSelected = selectedSymbol?.toUpperCase() === sym; // selected row in the list
 
                   return (
                     <tr
                       key={c.id ?? `${c.symbol}-${idx}`}
-                      data-sym={sym} // ← add this
+                      data-sym={sym}
                       role="button"
                       tabIndex={0}
                       onClick={() => sym && openAnalytics(sym)}
                       onKeyDown={(e) => {
                         if ((e.key === "Enter" || e.key === " ") && sym) openAnalytics(sym);
                       }}
-                      aria-selected={selectedSymbol?.toUpperCase() === sym || undefined}
+                      aria-selected={isSelected || undefined}
                       style={{
                         cursor: sym ? "pointer" : "default",
-                        ...(selectedSymbol?.toUpperCase() === sym
+                        ...(isSelected
                           ? { outline: "1px solid #555", background: "rgba(255,255,255,0.03)" }
                           : {}),
                       }}
@@ -656,11 +661,11 @@ export default function Companies() {
                             type="button"
                             onClick={() => openAnalytics(sym)}
                             onKeyDown={(e) => {
-                              // English: keyboard accessible (Enter/Space)
+                              // keyboard accessible (Enter/Space)
                               if (e.key === "Enter" || e.key === " ") openAnalytics(sym);
                             }}
                             title={`Open ${sym} analytics below`}
-                            // English: make button look like plain text
+                            // make button look like plain text
                             style={{ all: "unset", cursor: "pointer", color: "inherit" }}
                             aria-label={`Open ${sym} analytics`}
                           >
@@ -670,14 +675,74 @@ export default function Companies() {
                           "—"
                         )}
                       </td>
+
                       <td style={styles.td}>{safeName}</td>
                       <td style={styles.td}>{c.sector ?? "—"}</td>
-                      <td style={styles.tdRight}>
+
+                      {/* Actions: show "Details" only when the row is currently selected */}
+                      <td
+                        style={{
+                          ...styles.tdRight,
+                          display: "flex", // lay out multiple actions nicely
+                          gap: 6,
+                          alignItems: "center",
+                          justifyContent: "flex-end",
+                        }}
+                      >
+                        {isSelected && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation(); // keep current row selection
+                              navigate(`/company/${sym}`); // go to detail route /company/:symbol
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" || e.key === " ") {
+                                e.stopPropagation();
+                                navigate(`/company/${sym}`);
+                              }
+                            }}
+                            title={`Details zu ${sym} öffnen`}
+                            aria-label={`Open details for ${sym}`}
+                            style={{
+                              // compact, unobtrusive action pill
+                              padding: "2px 6px",
+                              borderRadius: 8,
+                              fontSize: 11,
+                              lineHeight: 1.2,
+                              cursor: "pointer",
+
+                              // green accent to stand out on dark rows
+                              border: "1px solid #22c55e", // green-500
+                              background: "rgba(34, 197, 94, 0.12)", // soft green fill
+                              color: "#dcfce7", // green-100 text for contrast
+
+                              // small visual polish
+                              boxShadow: "0 0 0 0 rgba(34,197,94,0)",
+                              transition: "box-shadow 120ms ease, transform 60ms ease",
+                            }}
+                            onMouseDown={(e) => {
+                              // quick press feedback without layout shift
+                              e.currentTarget.style.transform = "translateY(1px)";
+                              e.currentTarget.style.boxShadow = "0 0 0 2px rgba(34,197,94,0.25)";
+                            }}
+                            onMouseUp={(e) => {
+                              e.currentTarget.style.transform = "translateY(0)";
+                              e.currentTarget.style.boxShadow = "0 0 0 0 rgba(34,197,94,0)";
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.transform = "translateY(0)";
+                              e.currentTarget.style.boxShadow = "0 0 0 0 rgba(34,197,94,0)";
+                            }}
+                          >
+                            Details
+                          </button>
+                        )}
+
                         {needsRefresh ? (
                           <button
                             disabled={!sym || isBusy}
                             onClick={(e) => {
-                              e.stopPropagation(); // English: prevent row click
+                              e.stopPropagation(); // prevent row click
                               refreshProfile(sym);
                             }}
                             onKeyDown={(e) => {

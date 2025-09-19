@@ -1,5 +1,4 @@
 // src/pages/Company.tsx
-import React from "react";
 import { Link, useParams } from "react-router-dom";
 import CompanyHeader from "../components/company/CompanyHeader";
 import CompanyKpis from "../components/company/CompanyKpis";

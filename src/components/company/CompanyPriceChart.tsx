@@ -281,7 +281,7 @@ export default function CompanyPriceChart({ symbol }: { symbol: string }) {
                 />
               </AreaChart>
             </ResponsiveContainer>
-          </div>          
+          </div>
         )}
       </div>
     </section>

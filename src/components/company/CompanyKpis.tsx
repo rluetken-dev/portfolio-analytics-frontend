@@ -142,56 +142,65 @@ export default function CompanyKpis({ symbol }: { symbol: string }) {
     <section style={{ marginTop: 12 }}>
       <h2 style={{ margin: "0 0 8px 0", fontSize: 16, opacity: 0.9 }}>Key Metrics</h2>
       {err && <div style={{ marginBottom: 8, fontSize: 12, color: "#f87171" }}>{err}</div>}
-
       <div style={grid}>
-        {(loading ? Array.from({ length: 6 }) : metrics).map((m, i) => (
-          <div key={i} style={card} aria-busy={loading}>
-            {loading ? (
-              <>
-                <div style={{ fontSize: 11, opacity: 0.6 }}>Loading…</div>
-                <div
-                  style={{
-                    marginTop: 8,
-                    height: 18,
-                    borderRadius: 6,
-                    background: "rgba(255,255,255,0.12)",
-                  }}
-                />
-              </>
-            ) : (
-              <>
-                <div style={{ fontSize: 11, opacity: 0.7 }}>{m.label}</div>
-                <div
-                  title={m.hint}
-                  style={{
-                    fontSize: 18,
-                    fontWeight: 600,
-                    marginTop: 4,
-                    whiteSpace: "nowrap",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                  }}
-                >
-                  {m.value}
-                </div>
-                {m.hint && (
+        {/*
+          English: always iterate over indices; when loading, show 6 skeleton cards.
+          This avoids 'm' being inferred as unknown/undefined.
+        */}
+        {Array.from({ length: loading ? 6 : metrics.length }).map((_, i) => {
+          // English: when not loading, pick the typed metric for this index
+          const m: Metric | null = loading ? null : (metrics[i] ?? null);
+
+          return (
+            <div key={i} style={card} aria-busy={loading}>
+              {loading ? (
+                <>
+                  <div style={{ fontSize: 11, opacity: 0.6 }}>Loading…</div>
                   <div
                     style={{
-                      fontSize: 10,
-                      opacity: 0.6,
+                      marginTop: 8,
+                      height: 18,
+                      borderRadius: 6,
+                      background: "rgba(255,255,255,0.12)",
+                    }}
+                  />
+                </>
+              ) : (
+                <>
+                  {/* English: safe access because m is non-null when not loading */}
+                  <div style={{ fontSize: 11, opacity: 0.7 }}>{m?.label}</div>
+                  <div
+                    title={m?.hint}
+                    style={{
+                      fontSize: 18,
+                      fontWeight: 600,
                       marginTop: 4,
                       whiteSpace: "nowrap",
                       overflow: "hidden",
                       textOverflow: "ellipsis",
                     }}
                   >
-                    {m.hint}
+                    {m?.value}
                   </div>
-                )}
-              </>
-            )}
-          </div>
-        ))}
+                  {m?.hint && (
+                    <div
+                      style={{
+                        fontSize: 10,
+                        opacity: 0.6,
+                        marginTop: 4,
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                      }}
+                    >
+                      {m.hint}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          );
+        })}
       </div>
     </section>
   );

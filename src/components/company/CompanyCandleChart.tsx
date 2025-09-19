@@ -163,9 +163,7 @@ export default function CompanyCandleChart({ symbol, range, height = 260 }: Prop
           justifyContent: "space-between",
           gap: 8,
         }}
-      >
-        <h2 style={{ margin: 0, fontSize: 16, opacity: 0.9 }}>Candle (6M)</h2>
-        {/* English: follower has no own reset or brush */}
+      >        
       </div>
 
       {err && <div style={{ marginBottom: 8, fontSize: 12, color: "#f87171" }}>{err}</div>}
@@ -236,7 +234,7 @@ export default function CompanyCandleChart({ symbol, range, height = 260 }: Prop
                 type="monotone"
                 dataKey="close"
                 stroke="currentColor"
-                fill="url(#gCandle)"
+                fill="none"
                 strokeWidth={2}
                 dot={false}
                 isAnimationActive={false} // English: keep it snappy

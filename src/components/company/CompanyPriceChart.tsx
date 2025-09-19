@@ -29,16 +29,19 @@ function parseISO(s: string): Date {
   return Number.isNaN(+d) ? new Date(s.replace("Z", "")) : d;
 }
 
-export default function CompanyPriceChart({ symbol }: { symbol: string }) {
+type Props = {
+  symbol: string;
+  range: { start: number; end: number } | null; // English: controlled brush range (indices)
+  onRangeChange: (r: { start: number; end: number } | null) => void; // English: bubble up changes
+};
+
+export default function CompanyPriceChart({ symbol, range, onRangeChange }: Props) {
   const sym = (symbol ?? "").trim().toUpperCase();
   const backendBase = React.useMemo(() => "http://localhost:5046", []);
 
   const [data, setData] = React.useState<Pt[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [err, setErr] = React.useState<string | null>(null);
-
-  // Brush-driven view range (indexes into `data`)
-  const [range, setRange] = React.useState<{ start: number; end: number } | null>(null);
 
   React.useEffect(() => {
     let aborted = false;
@@ -84,7 +87,7 @@ export default function CompanyPriceChart({ symbol }: { symbol: string }) {
 
         if (aborted) return;
         setData(pts);
-        setRange(null); // reset brush on new fetch
+        onRangeChange(null);
       } catch (e) {
         if (aborted) return;
         setErr(e instanceof Error ? e.message : String(e));
@@ -98,7 +101,7 @@ export default function CompanyPriceChart({ symbol }: { symbol: string }) {
     return () => {
       aborted = true;
     };
-  }, [sym, backendBase]);
+  }, [sym, backendBase, onRangeChange]);
 
   const view = React.useMemo(() => {
     if (!data.length) return [];
@@ -108,7 +111,7 @@ export default function CompanyPriceChart({ symbol }: { symbol: string }) {
     return data.slice(start, end + 1);
   }, [data, range]);
 
-  const resetView = React.useCallback(() => setRange(null), []);
+  const resetView = React.useCallback(() => onRangeChange(null), [onRangeChange]);
 
   const tickFmt = React.useCallback((iso: string) => {
     const d = parseISO(iso);
@@ -276,7 +279,7 @@ export default function CompanyPriceChart({ symbol }: { symbol: string }) {
                       start = Math.max(0, Math.min(start, end - MIN));
                     }
 
-                    setRange({ start, end }); // English: update FULL-range → 'view' recomputes
+                    onRangeChange({ start, end });
                   }}
                 />
               </AreaChart>

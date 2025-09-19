@@ -7,7 +7,7 @@ import {
   XAxis,
   YAxis,
   CartesianGrid,
-  Tooltip,
+  Tooltip,  
 } from "recharts";
 
 /** ---------------- Types ---------------- */
@@ -245,13 +245,21 @@ export default function CompanyCandleChart({ symbol, range, height = 260 }: Prop
     return candles.filter((c) => c.date >= fromDate && c.date <= toDate);
   }, [candles, data, range]);
 
+  // English: Y domain based on visible candle lows/highs
+  const yDomain = React.useMemo(() => {
+    if (!viewCandles.length) return null;
+    const min = Math.min(...viewCandles.map(c => c.low));
+    const max = Math.max(...viewCandles.map(c => c.high));
+    return [min, max] as [number, number];
+  }, [viewCandles]);
+ 
   // English: draw ALL visible candles aligned to the area chart's x-indexes
   function MiniCandles(props: {
     candles: CandlePt[];
     indexByDate: Map<string, number>;
     count: number; // total visible points in 'view' (area)
     yMin: number; // from area view (aligns with Recharts Y axis)
-    yMax: number;
+    yMax: number;    
   }) {
     const { candles, indexByDate, count, yMin, yMax } = props;
     if (count <= 1 || candles.length === 0 || !Number.isFinite(yMin) || !Number.isFinite(yMax)) {
@@ -296,7 +304,7 @@ export default function CompanyCandleChart({ symbol, range, height = 260 }: Prop
             strokeWidth={Math.max(1, Math.floor(bodyW / 6))}
           />
           {/* body */}
-          <rect x={bx} y={by} width={bodyW} height={bh} fill={color} opacity={0.9} />
+          <rect x={bx} y={by} width={bodyW} height={bh} fill={color} opacity={0.9} />          
         </g>
       );
     });
@@ -379,7 +387,7 @@ export default function CompanyCandleChart({ symbol, range, height = 260 }: Prop
                   tickMargin={8}
                 />
                 <YAxis
-                  domain={["dataMin", "dataMax"]}
+                  domain={yDomain ?? ["dataMin", "dataMax"]}
                   width={50}
                   tickFormatter={(v) => (typeof v === "number" ? v.toFixed(0) : String(v))}
                 />
@@ -405,7 +413,7 @@ export default function CompanyCandleChart({ symbol, range, height = 260 }: Prop
                   dot={false}
                   isAnimationActive={false}
                   name="Close"
-                />
+                />               
               </AreaChart>
             </ResponsiveContainer>
 
@@ -416,7 +424,7 @@ export default function CompanyCandleChart({ symbol, range, height = 260 }: Prop
                 left: 50, // YAxis width
                 right: 12, // chart margin right
                 top: 8, // chart margin top
-                bottom: 0, // chart margin bottom
+                bottom: 30, // chart margin bottom
                 pointerEvents: "none",
               }}
             >
@@ -425,8 +433,8 @@ export default function CompanyCandleChart({ symbol, range, height = 260 }: Prop
                 indexByDate={idxByDate}
                 count={view.length}
                 // English: use area view's close-range so Y matches Recharts axis
-                yMin={view.length ? Math.min(...view.map((p) => p.close)) : 0}
-                yMax={view.length ? Math.max(...view.map((p) => p.close)) : 1}
+                yMin={yDomain ? yDomain[0] : (view.length ? Math.min(...view.map(p => p.close)) : 0)}
+                yMax={yDomain ? yDomain[1] : (view.length ? Math.max(...view.map(p => p.close)) : 1)}                
               />
             </div>
           </div>

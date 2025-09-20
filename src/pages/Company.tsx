@@ -5,6 +5,7 @@ import CompanyHeader from "../components/company/CompanyHeader";
 import CompanyKpis from "../components/company/CompanyKpis";
 import CompanyPriceChart from "../components/company/CompanyPriceChart";
 import CompanyCandleChart from "../components/company/CompanyCandleChart";
+import CompanyAnalyticsPanel from "../components/company/CompanyAnalyticsPanel";
 
 export default function CompanyPage() {
   const { symbol } = useParams<{ symbol?: string }>();
@@ -44,6 +45,10 @@ export default function CompanyPage() {
 
       {/* Candle = Follower (no own brush) */}
       <CompanyCandleChart symbol={sym} range={range} height={320} />
+
+      <div style={{ marginTop: 32 }}>
+        <CompanyAnalyticsPanel symbol={sym} />
+      </div>
     </div>
   );
 }

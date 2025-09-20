@@ -7,7 +7,7 @@ import {
   XAxis,
   YAxis,
   CartesianGrid,
-  Tooltip,  
+  Tooltip,
 } from "recharts";
 
 /** ---------------- Types ---------------- */
@@ -57,6 +57,7 @@ type Props = {
   symbol: string;
   range: { start: number; end: number } | null; // follow the price chart's brush selection
   height?: number; // optional height (default 260)
+  currency?: string;
 };
 
 function fmtDate(d: Date) {
@@ -64,6 +65,17 @@ function fmtDate(d: Date) {
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const dd = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${dd}`;
+}
+
+// English: currency formatter using Intl API
+function fmtMoney(v: number, currency = "USD") {
+  if (!Number.isFinite(v)) return "—";
+  try {
+    return new Intl.NumberFormat(undefined, { style: "currency", currency, maximumFractionDigits: 2 }).format(v);
+  } catch {
+    // English: fallback if currency code is unknown
+    return v.toFixed(2) + " " + currency;
+  }
 }
 
 function parseISO(s: string): Date {
@@ -96,7 +108,7 @@ function pickNumber(...candidates: Array<unknown>): number | null {
   return null;
 }
 
-export default function CompanyCandleChart({ symbol, range, height = 260 }: Props) {
+export default function CompanyCandleChart({ symbol, range, height = 260, currency = "USD" }: Props) {
   const sym = (symbol ?? "").trim().toUpperCase();
   const backendBase = React.useMemo(() => "http://localhost:5046", []);
 
@@ -248,18 +260,56 @@ export default function CompanyCandleChart({ symbol, range, height = 260 }: Prop
   // English: Y domain based on visible candle lows/highs
   const yDomain = React.useMemo(() => {
     if (!viewCandles.length) return null;
-    const min = Math.min(...viewCandles.map(c => c.low));
-    const max = Math.max(...viewCandles.map(c => c.high));
+    const min = Math.min(...viewCandles.map((c) => c.low));
+    const max = Math.max(...viewCandles.map((c) => c.high));
     return [min, max] as [number, number];
   }, [viewCandles]);
- 
+
+  // English: fast lookup to get the candle (O/H/L/C) by ISO date for tooltips
+  const ohlcByDate = React.useMemo(() => {
+    const m = new Map<string, CandlePt>();
+    for (const c of candles) {
+      // English: later the tooltip will use label=date to fetch O/H/L/C in O(1)
+      if (c.date) m.set(c.date, c);
+    }
+    return m;
+  }, [candles]);
+
+  // English: minimal, explicit props for our tooltip
+  type CandleTooltipProps = {
+    active?: boolean;
+    label?: string | number;
+  };
+
+  // English: simple tooltip to show O/H/L/C for the hovered date
+  function CandleTooltip({ active, label }: CandleTooltipProps) {
+    if (!active || label == null) return null;
+
+    // English: normalize label (Recharts may give string or number)
+    const key = typeof label === "string" ? label : String(label);
+
+    // English: lookup the candle by date (ISO "YYYY-MM-DD")
+    const c = ohlcByDate.get(key);
+    if (!c) return null;
+
+    return (
+    <div style={{ background: "rgba(20,20,24,0.92)", color: "#fff", padding: "6px 8px", borderRadius: 6, fontSize: 12 }}>
+      <div style={{ opacity: 0.8, marginBottom: 4 }}>{key}</div>
+      <div>O: {fmtMoney(c.open, currency)}</div>   {/* English: show as money */}
+      <div>H: {fmtMoney(c.high, currency)}</div>
+      <div>L: {fmtMoney(c.low, currency)}</div>
+      <div>C: {fmtMoney(c.close, currency)}</div>
+    </div>
+  );
+  }
+
   // English: draw ALL visible candles aligned to the area chart's x-indexes
   function MiniCandles(props: {
     candles: CandlePt[];
     indexByDate: Map<string, number>;
     count: number; // total visible points in 'view' (area)
     yMin: number; // from area view (aligns with Recharts Y axis)
-    yMax: number;    
+    yMax: number;
   }) {
     const { candles, indexByDate, count, yMin, yMax } = props;
     if (count <= 1 || candles.length === 0 || !Number.isFinite(yMin) || !Number.isFinite(yMax)) {
@@ -304,7 +354,7 @@ export default function CompanyCandleChart({ symbol, range, height = 260 }: Prop
             strokeWidth={Math.max(1, Math.floor(bodyW / 6))}
           />
           {/* body */}
-          <rect x={bx} y={by} width={bodyW} height={bh} fill={color} opacity={0.9} />          
+          <rect x={bx} y={by} width={bodyW} height={bh} fill={color} opacity={0.9} />
         </g>
       );
     });
@@ -391,7 +441,7 @@ export default function CompanyCandleChart({ symbol, range, height = 260 }: Prop
                   width={50}
                   tickFormatter={(v) => (typeof v === "number" ? v.toFixed(0) : String(v))}
                 />
-                <Tooltip
+                {/* <Tooltip
                   formatter={(value: number | string): string => {
                     const n = typeof value === "number" ? value : Number(value);
                     return Number.isFinite(n) ? `${n.toFixed(2)} USD` : "n/a";
@@ -403,7 +453,8 @@ export default function CompanyCandleChart({ symbol, range, height = 260 }: Prop
                       day: "2-digit",
                     })
                   }
-                />
+                /> */}
+                <Tooltip content={<CandleTooltip />} />
                 <Area
                   type="monotone"
                   dataKey="close"
@@ -413,7 +464,7 @@ export default function CompanyCandleChart({ symbol, range, height = 260 }: Prop
                   dot={false}
                   isAnimationActive={false}
                   name="Close"
-                />               
+                />
               </AreaChart>
             </ResponsiveContainer>
 
@@ -433,8 +484,12 @@ export default function CompanyCandleChart({ symbol, range, height = 260 }: Prop
                 indexByDate={idxByDate}
                 count={view.length}
                 // English: use area view's close-range so Y matches Recharts axis
-                yMin={yDomain ? yDomain[0] : (view.length ? Math.min(...view.map(p => p.close)) : 0)}
-                yMax={yDomain ? yDomain[1] : (view.length ? Math.max(...view.map(p => p.close)) : 1)}                
+                yMin={
+                  yDomain ? yDomain[0] : view.length ? Math.min(...view.map((p) => p.close)) : 0
+                }
+                yMax={
+                  yDomain ? yDomain[1] : view.length ? Math.max(...view.map((p) => p.close)) : 1
+                }
               />
             </div>
           </div>

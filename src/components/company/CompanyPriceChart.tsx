@@ -23,6 +23,17 @@ function fmtDate(d: Date) {
   return `${y}-${m}-${dd}`;
 }
 
+// English: locale-aware money formatter using Intl
+function fmtMoney(v: number, currency = "USD") {
+  if (!Number.isFinite(v)) return "—";
+  try {
+    return new Intl.NumberFormat(undefined, { style: "currency", currency, maximumFractionDigits: 2 }).format(v);
+  } catch {
+    // English: fallback for unknown currency codes
+    return `${v.toFixed(2)} ${currency}`;
+  }
+}
+
 function parseISO(s: string): Date {
   // Keep it robust against missing timezone
   const d = new Date(s);
@@ -33,9 +44,10 @@ type Props = {
   symbol: string;
   range: { start: number; end: number } | null; // English: controlled brush range (indices)
   onRangeChange: (r: { start: number; end: number } | null) => void; // English: bubble up changes
+  currency?: string;
 };
 
-export default function CompanyPriceChart({ symbol, range, onRangeChange }: Props) {
+export default function CompanyPriceChart({ symbol, range, onRangeChange, currency = "USD" }: Props) {
   const sym = (symbol ?? "").trim().toUpperCase();
   const backendBase = React.useMemo(() => "http://localhost:5046", []);
 
@@ -121,8 +133,8 @@ export default function CompanyPriceChart({ symbol, range, onRangeChange }: Prop
   const tooltipFmt = React.useCallback((value: number | string): string => {
     // 2 decimals, USD for now; currency toggle comes later
     const n = typeof value === "number" ? value : Number(value);
-    return Number.isFinite(n) ? `${n.toFixed(2)} USD` : "n/a";
-  }, []);
+    return Number.isFinite(n) ? fmtMoney(n, currency) : "n/a";
+  }, [currency]);
 
   if (!sym) return null;
 

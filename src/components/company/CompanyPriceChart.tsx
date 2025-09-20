@@ -27,7 +27,11 @@ function fmtDate(d: Date) {
 function fmtMoney(v: number, currency = "USD") {
   if (!Number.isFinite(v)) return "—";
   try {
-    return new Intl.NumberFormat(undefined, { style: "currency", currency, maximumFractionDigits: 2 }).format(v);
+    return new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency,
+      maximumFractionDigits: 2,
+    }).format(v);
   } catch {
     // English: fallback for unknown currency codes
     return `${v.toFixed(2)} ${currency}`;
@@ -47,7 +51,12 @@ type Props = {
   currency?: string;
 };
 
-export default function CompanyPriceChart({ symbol, range, onRangeChange, currency = "USD" }: Props) {
+export default function CompanyPriceChart({
+  symbol,
+  range,
+  onRangeChange,
+  currency = "USD",
+}: Props) {
   const sym = (symbol ?? "").trim().toUpperCase();
   const backendBase = React.useMemo(() => "http://localhost:5046", []);
 
@@ -130,11 +139,14 @@ export default function CompanyPriceChart({ symbol, range, onRangeChange, curren
     return d.toLocaleDateString(undefined, { month: "short", year: "2-digit" });
   }, []);
 
-  const tooltipFmt = React.useCallback((value: number | string): string => {
-    // 2 decimals, USD for now; currency toggle comes later
-    const n = typeof value === "number" ? value : Number(value);
-    return Number.isFinite(n) ? fmtMoney(n, currency) : "n/a";
-  }, [currency]);
+  const tooltipFmt = React.useCallback(
+    (value: number | string): string => {
+      // 2 decimals, USD for now; currency toggle comes later
+      const n = typeof value === "number" ? value : Number(value);
+      return Number.isFinite(n) ? fmtMoney(n, currency) : "n/a";
+    },
+    [currency],
+  );
 
   if (!sym) return null;
 

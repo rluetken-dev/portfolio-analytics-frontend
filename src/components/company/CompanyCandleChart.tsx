@@ -71,7 +71,11 @@ function fmtDate(d: Date) {
 function fmtMoney(v: number, currency = "USD") {
   if (!Number.isFinite(v)) return "—";
   try {
-    return new Intl.NumberFormat(undefined, { style: "currency", currency, maximumFractionDigits: 2 }).format(v);
+    return new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency,
+      maximumFractionDigits: 2,
+    }).format(v);
   } catch {
     // English: fallback if currency code is unknown
     return v.toFixed(2) + " " + currency;
@@ -108,7 +112,12 @@ function pickNumber(...candidates: Array<unknown>): number | null {
   return null;
 }
 
-export default function CompanyCandleChart({ symbol, range, height = 260, currency = "USD" }: Props) {
+export default function CompanyCandleChart({
+  symbol,
+  range,
+  height = 260,
+  currency = "USD",
+}: Props) {
   const sym = (symbol ?? "").trim().toUpperCase();
   const backendBase = React.useMemo(() => "http://localhost:5046", []);
 
@@ -292,15 +301,50 @@ export default function CompanyCandleChart({ symbol, range, height = 260, curren
     const c = ohlcByDate.get(key);
     if (!c) return null;
 
+    // English: day change vs open (absolute and percent)
+    const dOpen = c.close - c.open;
+    const dOpenPct = c.open ? dOpen / c.open : 0;
+
+    // English: intraday range (high-low), percent vs open
+    const rangeAbs = c.high - c.low;
+    const rangePct = c.open ? rangeAbs / c.open : 0;
+
+    // English: color for up/down close
+    const up = c.close >= c.open;
+    const col = up ? "#22c55e" : "#ef4444";
+
     return (
-    <div style={{ background: "rgba(20,20,24,0.92)", color: "#fff", padding: "6px 8px", borderRadius: 6, fontSize: 12 }}>
-      <div style={{ opacity: 0.8, marginBottom: 4 }}>{key}</div>
-      <div>O: {fmtMoney(c.open, currency)}</div>   {/* English: show as money */}
-      <div>H: {fmtMoney(c.high, currency)}</div>
-      <div>L: {fmtMoney(c.low, currency)}</div>
-      <div>C: {fmtMoney(c.close, currency)}</div>
-    </div>
-  );
+      <div
+        style={{
+          background: "rgba(20,20,24,0.92)",
+          color: "#fff",
+          padding: "6px 8px",
+          borderRadius: 6,
+          fontSize: 12,
+          position: "relative",
+          zIndex: 9999,
+        }}
+      >
+        <div style={{ opacity: 0.8, marginBottom: 4 }}>{key}</div>
+
+        <div>O: {fmtMoney(c.open, currency)}</div>
+        <div>H: {fmtMoney(c.high, currency)}</div>
+        <div>L: {fmtMoney(c.low, currency)}</div>
+        <div>C: {fmtMoney(c.close, currency)}</div>
+
+        {/* NEW: range and delta rows */}
+        <div style={{ marginTop: 4 }}>
+          <div>
+            {/* English: intraday range (abs + %) */}
+            Range: {fmtMoney(rangeAbs, currency)} ({(rangePct * 100).toFixed(2)}%)
+          </div>
+          <div style={{ color: col, fontWeight: 600 }}>
+            {/* English: change vs open (abs + %) */}Δ vs Open: {fmtMoney(dOpen, currency)} (
+            {(dOpenPct * 100).toFixed(2)}%)
+          </div>
+        </div>
+      </div>
+    );
   }
 
   // English: draw ALL visible candles aligned to the area chart's x-indexes
@@ -441,6 +485,13 @@ export default function CompanyCandleChart({ symbol, range, height = 260, curren
                   width={50}
                   tickFormatter={(v) => (typeof v === "number" ? v.toFixed(0) : String(v))}
                 />
+                {/* <YAxis
+                  domain={yDomain ?? ["dataMin", "dataMax"]}
+                  width={60} // English: a bit wider for currency symbols
+                  tickFormatter={(v) =>
+                    typeof v === "number" ? fmtMoney(v, currency) : String(v)
+                  }
+                /> */}
                 {/* <Tooltip
                   formatter={(value: number | string): string => {
                     const n = typeof value === "number" ? value : Number(value);
@@ -454,7 +505,10 @@ export default function CompanyCandleChart({ symbol, range, height = 260, curren
                     })
                   }
                 /> */}
-                <Tooltip content={<CandleTooltip />} />
+                <Tooltip
+                  content={<CandleTooltip />}
+                  wrapperStyle={{ zIndex: 2 }} // English: force tooltip above overlay
+                />
                 <Area
                   type="monotone"
                   dataKey="close"
@@ -477,6 +531,7 @@ export default function CompanyCandleChart({ symbol, range, height = 260, curren
                 top: 8, // chart margin top
                 bottom: 30, // chart margin bottom
                 pointerEvents: "none",
+                zIndex: 1,
               }}
             >
               <MiniCandles

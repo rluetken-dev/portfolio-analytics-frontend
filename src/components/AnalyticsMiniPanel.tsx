@@ -299,7 +299,7 @@ export default function AnalyticsMiniPanel({
     } catch (e) {
       console.warn("[pinned] read failed:", e); // English: ignore storage read errors
     }
-    return ["AAPL", "AMD"];
+    return [];
   });
 
   const [confirmedSym, setConfirmedSym] = useState<string>("");
@@ -315,7 +315,8 @@ export default function AnalyticsMiniPanel({
   // English: persist pinned list on change
   useEffect(() => {
     try {
-      localStorage.setItem("analytics:pinned", JSON.stringify(pinned));
+      if (pinned.length === 0) localStorage.removeItem("analytics:pinned");
+      else localStorage.setItem("analytics:pinned", JSON.stringify(pinned));
     } catch (e) {
       console.warn("[pinned] write failed:", e); // English: ignore quota errors; best-effort
     }

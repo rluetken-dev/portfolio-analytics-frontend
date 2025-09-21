@@ -420,17 +420,39 @@ export default function Companies() {
 
   const navigate = useNavigate(); // imperative navigation handler
 
-  // English: when a symbol is selected/changes, scroll its row into view
+  // English: keep localStorage pins aligned with the current companies list
   useEffect(() => {
-    if (!selectedSymbol) return;
-    // wait one frame so the row exists and highlight applied
-    requestAnimationFrame(() => {
-      const row = document.querySelector(
-        `tr[data-sym="${selectedSymbol.toUpperCase()}"]`,
-      ) as HTMLElement | null;
-      row?.scrollIntoView({ behavior: "smooth", block: "center" });
-    });
-  }, [selectedSymbol, sortedItems]);
+    if (loading) return; // wait until first load has finished
+
+    // English: valid symbols from current table
+    const valid = new Set(items.map((c) => (c.symbol ?? "").toUpperCase().trim()).filter(Boolean));
+
+    // English: read & normalize current pins
+    let pins: string[] = [];
+    try {
+      const raw = localStorage.getItem("analytics:pinned");
+      pins = raw ? JSON.parse(raw) : [];
+    } catch {
+      // English: treat invalid JSON as no pins
+      pins = [];
+    }
+
+    const norm = pins.map((s) => String(s).toUpperCase().trim()).filter(Boolean);
+    const pruned = norm.filter((sym) => valid.has(sym));
+
+    // English: write back only when needed
+    if (pruned.length === 0) {
+      localStorage.removeItem("analytics:pinned");
+    } else if (JSON.stringify(pruned) !== JSON.stringify(norm)) {
+      localStorage.setItem("analytics:pinned", JSON.stringify(pruned));
+    }
+
+    // English: clear lastSymbol if it is not present anymore
+    const last = (localStorage.getItem("analytics:lastSymbol") ?? "").toUpperCase().trim();
+    if (last && !valid.has(last)) {
+      localStorage.removeItem("analytics:lastSymbol");
+    }
+  }, [items, loading]);
 
   // --- Render states ---
   if (error) return <p style={{ color: "red" }}>Error: {error}</p>;

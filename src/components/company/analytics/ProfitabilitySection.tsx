@@ -36,9 +36,9 @@ function fmtPercent(v: number | null | undefined, digits = 1): string {
 /** -------- Component -------- */
 export default function ProfitabilitySection({
   symbol,
-  showROE = false,        // English: avoid duplicates with Key Metrics by default
-  showNetMargin = false,  // English: avoid duplicates with Key Metrics by default
-  showFcfYield = false,   // English: avoid duplicates with Key Metrics by default
+  showROE = false, // English: avoid duplicates with Key Metrics by default
+  showNetMargin = false, // English: avoid duplicates with Key Metrics by default
+  showFcfYield = false, // English: avoid duplicates with Key Metrics by default
 }: {
   symbol: string;
   showROE?: boolean;
@@ -78,24 +78,24 @@ export default function ProfitabilitySection({
 
       try {
         // English: fetch all profitability metrics in parallel
-        const [
-          roeRes,
-          roaRes,
-          netMarginRes,
-          fcfYieldRes,
-          fcfMarginRes,
-          oeYieldRes,
-        ] = await Promise.all([
-          fetchMetricNumber(backendBase, "/api/analytics/roe", sym, ["value", "roe"]),
-          fetchMetricNumber(backendBase, "/api/analytics/roa", sym, ["value", "roa"]),
-          fetchMetricNumber(backendBase, "/api/analytics/net-margin", sym, ["value", "netMargin"]),
-          fetchMetricNumber(backendBase, "/api/analytics/fcf-yield", sym, ["value", "fcfYield"]),
-          fetchMetricNumber(backendBase, "/api/analytics/fcf-margin", sym, ["value", "fcfMargin"]),
-          fetchMetricNumber(backendBase, "/api/analytics/owner-earnings-yield", sym, [
-            "value",
-            "ownerEarningsYield",
-          ]),
-        ]);
+        const [roeRes, roaRes, netMarginRes, fcfYieldRes, fcfMarginRes, oeYieldRes] =
+          await Promise.all([
+            fetchMetricNumber(backendBase, "/api/analytics/roe", sym, ["value", "roe"]),
+            fetchMetricNumber(backendBase, "/api/analytics/roa", sym, ["value", "roa"]),
+            fetchMetricNumber(backendBase, "/api/analytics/net-margin", sym, [
+              "value",
+              "netMargin",
+            ]),
+            fetchMetricNumber(backendBase, "/api/analytics/fcf-yield", sym, ["value", "fcfYield"]),
+            fetchMetricNumber(backendBase, "/api/analytics/fcf-margin", sym, [
+              "value",
+              "fcfMargin",
+            ]),
+            fetchMetricNumber(backendBase, "/api/analytics/owner-earnings-yield", sym, [
+              "value",
+              "ownerEarningsYield",
+            ]),
+          ]);
 
         if (cancelled) return;
 
@@ -117,12 +117,12 @@ export default function ProfitabilitySection({
 
         // English: compute availability for VISIBLE metrics only
         const totalVisible =
-          (showROE ? 1 : 0) +               // ROE (toggle)
-          1 +                               // ROA (always visible here)
-          (showNetMargin ? 1 : 0) +         // Net Margin (toggle)
-          (showFcfYield ? 1 : 0) +          // FCF Yield (toggle)
-          1 +                               // FCF Margin (always visible)
-          1;                                // OE Yield (always visible)
+          (showROE ? 1 : 0) + // ROE (toggle)
+          1 + // ROA (always visible here)
+          (showNetMargin ? 1 : 0) + // Net Margin (toggle)
+          (showFcfYield ? 1 : 0) + // FCF Yield (toggle)
+          1 + // FCF Margin (always visible)
+          1; // OE Yield (always visible)
 
         const available =
           (showROE && roeOk ? 1 : 0) +
@@ -157,7 +157,7 @@ export default function ProfitabilitySection({
     (showNetMargin ? 1 : 0) +
     (showFcfYield ? 1 : 0) +
     1 + // FCF Margin
-    1;  // OE Yield
+    1; // OE Yield
 
   return (
     <div>

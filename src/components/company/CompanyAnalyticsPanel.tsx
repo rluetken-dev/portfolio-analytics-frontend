@@ -5,7 +5,6 @@ import EfficiencySection from "./analytics/EfficiencySection";
 import PerShareSection from "./analytics/PerShareSection";
 import CashFlowSection from "./analytics/CashFlowSection";
 
-
 export default function CompanyAnalyticsPanel({ symbol }: { symbol?: string }) {
   const sym = (symbol ?? "").trim().toUpperCase();
   if (!sym) return null;

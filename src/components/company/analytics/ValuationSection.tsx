@@ -53,8 +53,12 @@ function fmtRatio(v: number | null | undefined) {
 export default function ValuationSection({
   symbol,
   showPrice = false, // English: avoid duplicates with Key Metrics by default
-  showPE = false,    // English: ditto; we focus on PB and P/OE here
-}: { symbol: string; showPrice?: boolean; showPE?: boolean }) {
+  showPE = false, // English: ditto; we focus on PB and P/OE here
+}: {
+  symbol: string;
+  showPrice?: boolean;
+  showPE?: boolean;
+}) {
   const sym = (symbol ?? "").trim().toUpperCase();
 
   const backendBase = React.useMemo(() => "http://localhost:5046", []);
@@ -87,7 +91,11 @@ export default function ValuationSection({
           getLatestCloseFromQuotes(sym),
           fetchMetricNumber(backendBase, "/api/analytics/pe", sym, ["value", "pe"]),
           fetchMetricNumber(backendBase, "/api/analytics/pb", sym, ["value", "pb"]),
-          fetchMetricNumber(backendBase, "/api/analytics/p-to-oe", sym, ["value", "pToOe", "pOverOe"]),
+          fetchMetricNumber(backendBase, "/api/analytics/p-to-oe", sym, [
+            "value",
+            "pToOe",
+            "pOverOe",
+          ]),
         ]);
         if (cancelled) return;
 
@@ -107,23 +115,26 @@ export default function ValuationSection({
         const visible = [
           showPrice ? (priceOk ? 1 : 0) : null,
           showPE ? (peOk ? 1 : 0) : null,
-          pbOk ? 1 : 0,     // PB always visible in this section
-          poeOk ? 1 : 0,    // P/OE always visible in this section
+          pbOk ? 1 : 0, // PB always visible in this section
+          poeOk ? 1 : 0, // P/OE always visible in this section
         ].filter((x) => x !== null) as number[];
 
-        const totalVisible =
-          (showPrice ? 1 : 0) + (showPE ? 1 : 0) + 1 /* PB */ + 1 /* P/OE */;
+        const totalVisible = (showPrice ? 1 : 0) + (showPE ? 1 : 0) + 1 /* PB */ + 1; /* P/OE */
         const available = visible.reduce((a, b) => a + b, 0);
 
         setCount(`${available}/${totalVisible}`);
       } catch {
         // English: keep placeholders
-        setCount(`${(showPrice ? 0 : 0) + (showPE ? 0 : 0) + 0 + 0}/${(showPrice ? 1 : 0) + (showPE ? 1 : 0) + 2}`);
+        setCount(
+          `${(showPrice ? 0 : 0) + (showPE ? 0 : 0) + 0 + 0}/${(showPrice ? 1 : 0) + (showPE ? 1 : 0) + 2}`,
+        );
       }
     }
 
     run();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [sym, backendBase, showPrice, showPE]);
 
   if (!sym) return null;

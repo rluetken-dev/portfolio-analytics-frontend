@@ -20,7 +20,8 @@ async function fetchMetricNumber(
 
   if (raw && typeof raw === "object") {
     const o = raw as Record<string, unknown>;
-    for (const k of keys) if (typeof o[k] === "number") return { value: o[k] as number, status: resp.status };
+    for (const k of keys)
+      if (typeof o[k] === "number") return { value: o[k] as number, status: resp.status };
   }
   return { value: null, status: resp.status };
 }
@@ -65,9 +66,18 @@ export default function SolvencySection({
 
       try {
         const [dteR, dtaR, eqrR] = await Promise.all([
-          fetchMetricNumber(backendBase, "/api/analytics/debt-to-equity", sym, ["value", "debtToEquity"]),
-          fetchMetricNumber(backendBase, "/api/analytics/debt-to-assets", sym, ["value", "debtToAssets"]),
-          fetchMetricNumber(backendBase, "/api/analytics/equity-ratio", sym, ["value", "equityRatio"]),
+          fetchMetricNumber(backendBase, "/api/analytics/debt-to-equity", sym, [
+            "value",
+            "debtToEquity",
+          ]),
+          fetchMetricNumber(backendBase, "/api/analytics/debt-to-assets", sym, [
+            "value",
+            "debtToAssets",
+          ]),
+          fetchMetricNumber(backendBase, "/api/analytics/equity-ratio", sym, [
+            "value",
+            "equityRatio",
+          ]),
         ]);
         if (cancelled) return;
 
@@ -81,10 +91,7 @@ export default function SolvencySection({
 
         // English: visible metrics only (D/E is toggle)
         const totalVisible = (showDebtToEquity ? 1 : 0) + 1 + 1; // D/E?, D/A, Eq Ratio
-        const available =
-          (showDebtToEquity && dteOk ? 1 : 0) +
-          (dtaOk ? 1 : 0) +
-          (eqrOk ? 1 : 0);
+        const available = (showDebtToEquity && dteOk ? 1 : 0) + (dtaOk ? 1 : 0) + (eqrOk ? 1 : 0);
 
         setCount(`${available}/${totalVisible}`);
       } catch {

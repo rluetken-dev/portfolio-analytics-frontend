@@ -817,8 +817,8 @@ export default function Companies() {
                   label={({ name }) => String(name)} // EN: show sector name on slices
                   labelLine
                 >
-                  {sectorData.map((d, i) => (                    
-                     <Cell key={`cell-${i}`} fill={colorByIndex(i)} /> 
+                  {sectorData.map((d, i) => (
+                    <Cell key={`cell-${d.sector}-${i}`} fill={colorByIndex(i)} />  
                   ))}
                 </Pie>
                 <Tooltip />

@@ -58,10 +58,13 @@ type Props = {
   currency?: string;
 };
 
-// English: latest quote contract for anchoring
-type LatestQuote = { date: string; close: number };
+// // English: latest quote contract for anchoring
+// type LatestQuote = { date: string; close: number };
 
 /** ---------------- Utilities ---------------- */
+
+/** English: visible history window size (days) */
+const LOOKBACK_DAYS = 210;
 
 // English: zero-padded yyyy-MM-dd
 function fmtDate(d: Date) {
@@ -91,12 +94,12 @@ function parseISO(s: string): Date {
   return Number.isNaN(+d) ? new Date(s.replace("Z", "")) : d;
 }
 
-function isFiniteNumber(x: unknown): x is number {
-  return typeof x === "number" && Number.isFinite(x);
-}
-function isNonEmptyString(x: unknown): x is string {
-  return typeof x === "string" && x.trim().length > 0;
-}
+// function isFiniteNumber(x: unknown): x is number {
+//   return typeof x === "number" && Number.isFinite(x);
+// }
+// function isNonEmptyString(x: unknown): x is string {
+//   return typeof x === "string" && x.trim().length > 0;
+// }
 
 // ---------- helpers for flexible API fields ----------
 function toISODateYmd(x: unknown): string {
@@ -124,26 +127,26 @@ function pickNumber(...candidates: Array<unknown>): number | null {
 
 /** ---------------- API helpers ---------------- */
 
-// English: get DB-latest quote to anchor the window
-async function fetchLatestQuote(baseUrl: string, symbol: string): Promise<LatestQuote | null> {
-  const qs = new URLSearchParams({ symbol });
-  const resp = await fetch(`${baseUrl}/api/Quotes/latest?${qs.toString()}`, {
-    headers: { Accept: "application/json" },
-  });
-  if (!resp.ok) return null;
+// // English: get DB-latest quote to anchor the window
+// async function fetchLatestQuote(baseUrl: string, symbol: string): Promise<LatestQuote | null> {
+//   const qs = new URLSearchParams({ symbol });
+//   const resp = await fetch(`${baseUrl}/api/Quotes/latest?${qs.toString()}`, {
+//     headers: { Accept: "application/json" },
+//   });
+//   if (!resp.ok) return null;
 
-  const raw: unknown = await resp.json();
-  if (typeof raw === "object" && raw !== null) {
-    const obj = raw as Record<string, unknown>;
-    const dateCandidate =
-      obj["date"] ?? obj["Date"] ?? obj["tradingDate"] ?? obj["TradingDate"];
-    const closeCandidate = obj["close"] ?? obj["Close"];
-    if (isNonEmptyString(dateCandidate) && isFiniteNumber(closeCandidate)) {
-      return { date: dateCandidate, close: closeCandidate };
-    }
-  }
-  return null;
-}
+//   const raw: unknown = await resp.json();
+//   if (typeof raw === "object" && raw !== null) {
+//     const obj = raw as Record<string, unknown>;
+//     const dateCandidate =
+//       obj["date"] ?? obj["Date"] ?? obj["tradingDate"] ?? obj["TradingDate"];
+//     const closeCandidate = obj["close"] ?? obj["Close"];
+//     if (isNonEmptyString(dateCandidate) && isFiniteNumber(closeCandidate)) {
+//       return { date: dateCandidate, close: closeCandidate };
+//     }
+//   }
+//   return null;
+// }
 
 // English: fetch close timeseries within [from..to] (or backend default if omitted)
 async function fetchTimeseries(
@@ -255,27 +258,32 @@ export default function CompanyCandleChart({
         setLoading(true);
         setErr(null);
 
-        // 1) Anchor to DB-latest; otherwise let backend default/fallback handle it
-        const latest = await fetchLatestQuote(backendBase, sym);
+        // 1) English: fetch closes without window; anchor to the latest point we *actually* have
+        const ptsAll = await fetchTimeseries(backendBase, sym); // no from/to here
+        if (aborted) return;
 
         let fromISO: string | undefined;
         let toISO: string | undefined;
 
-        if (latest?.date) {
-          const to = new Date(latest.date);
+        if (ptsAll.length) {
+          // English: anchor window to the last local close
+          toISO = ptsAll[ptsAll.length - 1].date;
+          const to = new Date(toISO);
           const from = new Date(to);
-          from.setDate(to.getDate() - 180);
+          from.setDate(to.getDate() - LOOKBACK_DAYS);
           fromISO = fmtDate(from);
-          toISO = fmtDate(to);
+
+          // English: slice locally to avoid an extra network call for closes
+          const pts = ptsAll.filter((p) => p.date >= fromISO! && p.date <= toISO!);
+          setData(pts);
+        } else {
+          setData([]);
         }
 
-        // 2) Load close series (area baseline)
-        const pts = await fetchTimeseries(backendBase, sym, fromISO, toISO);
-        if (aborted) return;
-        setData(pts);
-
-        // 3) Load OHLC bars (same window)
+        // 2) English: fetch OHLC bars for the exact same [from..to] window
         const bars = await fetchOhlc(backendBase, sym, fromISO, toISO);
+        if (!aborted) setCandles(bars);
+
         if (!aborted) setCandles(bars);
       } catch (e) {
         if (aborted) return;

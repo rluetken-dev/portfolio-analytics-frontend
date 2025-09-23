@@ -242,6 +242,33 @@ function toUserMessage(err: unknown): string {
   return raw.length > 140 ? raw.slice(0, 140) + "…" : raw;
 }
 
+// English: read DB-latest date for anchoring the 180d window
+async function fetchLatestDateISO(baseUrl: string, symbol: string): Promise<string | null> {
+  const qs = new URLSearchParams({ symbol });
+  const resp = await fetch(`${baseUrl}/api/Quotes/latest?${qs.toString()}`, {
+    headers: { Accept: "application/json" },
+  });
+  if (!resp.ok) return null;
+
+  // English: tolerate different shapes/keys for the date field
+  const raw: unknown = await resp.json();
+  if (typeof raw === "object" && raw !== null) {
+    const o = raw as Record<string, unknown>;
+    const d =
+      o["date"] ??
+      o["Date"] ??
+      o["tradingDate"] ??
+      o["TradingDate"] ??
+      o["asOf"] ?? // sometimes 'asOf' is already yyyy-MM-dd
+      null;
+    if (typeof d === "string" && d.length >= 10) {
+      // English: normalize to yyyy-MM-dd
+      return d.slice(0, 10);
+    }
+  }
+  return null;
+}
+
 // English: optional initial symbol + notify parent when active symbol changes
 export default function AnalyticsMiniPanel({
   initialSymbol,
@@ -457,36 +484,48 @@ export default function AnalyticsMiniPanel({
         // English: store base close for later live delta calculation
         setBaseClose(price.value ?? null);
 
-        // 1b) Load timeseries (last 180 days) for sparkline
-        const to = new Date();
-        const from = new Date();
-        from.setDate(to.getDate() - 180);
-
+        // 1b) Load timeseries (last 180 days) for sparkline, anchored to DB-latest date
         try {
-          const tsResp = await fetch(
-            `${backendBase}/api/quotes/timeseries?symbol=${encodeURIComponent(sym)}&from=${fmt(from)}&to=${fmt(to)}`,
-            { headers: { Accept: "application/json" } },
-          );
+          // English: prefer 'asOf' from cached latest; else query /api/Quotes/latest
+          const fromCached = typeof price?.asOf === "string" && price.asOf.length >= 10 ? price.asOf.slice(0, 10) : null;
+          const latestISO =
+            fromCached ??
+            (await fetchLatestDateISO(backendBase, sym));
+
+          let url: string;
+          if (latestISO) {
+            // English: DB-anchored [latest-180d .. latest]
+            const to = new Date(latestISO);
+            const from = new Date(to);
+            from.setDate(to.getDate() - 180);
+
+            const qs = new URLSearchParams({
+              symbol: sym,
+              from: fmt(from),
+              to: fmt(to),
+            });
+            url = `${backendBase}/api/quotes/timeseries?${qs.toString()}`;
+          } else {
+            // English: no anchor available → let backend use its default/fallback window
+            const qs = new URLSearchParams({ symbol: sym });
+            url = `${backendBase}/api/quotes/timeseries?${qs.toString()}`;
+          }
+
+          const tsResp = await fetch(url, { headers: { Accept: "application/json" } });
 
           if (tsResp.ok) {
-            const raw = (await tsResp.json()) as unknown;
-            const arr = Array.isArray(raw) ? raw : [];
-            // Defensive parse
-            const pts: TimeseriesPoint[] = arr
-              .map((r: unknown) => {
-                if (typeof r === "object" && r !== null) {
-                  const obj = r as Record<string, unknown>;
-                  return {
-                    date: String(obj.date ?? ""),
-                    close: typeof obj.close === "number" ? obj.close : NaN,
-                  };
-                }
-                return { date: "", close: NaN };
-              })
-              .filter((p) => Number.isFinite(p.close));
+            const raw: unknown = await tsResp.json();
+            const arr = Array.isArray(raw) ? raw as Array<{ date?: unknown; close?: unknown }> : [];
 
-            // Ensure chronological
-            pts.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+            // English: defensive parse + chronological sort
+            const pts: TimeseriesPoint[] = arr
+              .map((r) => ({
+                date: typeof r?.date === "string" ? r.date : String(r?.date ?? ""),
+                close: typeof r?.close === "number" ? r.close : Number.NaN,
+              }))
+              .filter((p) => p.date && Number.isFinite(p.close))
+              .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+
             setSpark(pts);
           } else {
             setSpark([]);
@@ -494,7 +533,6 @@ export default function AnalyticsMiniPanel({
         } catch {
           setSpark([]);
         }
-
         // 2) Fetch all other analytics metrics in parallel
         const [
           peRes,

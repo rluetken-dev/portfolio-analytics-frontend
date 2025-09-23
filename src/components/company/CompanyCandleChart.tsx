@@ -33,18 +33,16 @@ type OhlcApiRow = {
   c?: number | string | null;
 };
 
-// English: price point reused for candle follower (we'll swap to real candles later)
+// English: price point reused for candle follower (area baseline)
 type Pt = { date: string; close: number };
 
-// English: tolerant API row type (handles multiple providers)
+// English: tolerant API row for closes
 type TimeseriesApiRow = {
-  // date/time variants
   date?: string | null;
   time?: string | number | null;
   timestamp?: number | null;
   t?: string | number | null;
 
-  // close price variants
   close?: number | null;
   adjustedClose?: number | null;
   adjClose?: number | null;
@@ -60,6 +58,12 @@ type Props = {
   currency?: string;
 };
 
+// English: latest quote contract for anchoring
+type LatestQuote = { date: string; close: number };
+
+/** ---------------- Utilities ---------------- */
+
+// English: zero-padded yyyy-MM-dd
 function fmtDate(d: Date) {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
@@ -77,7 +81,6 @@ function fmtMoney(v: number, currency = "USD") {
       maximumFractionDigits: 2,
     }).format(v);
   } catch {
-    // English: fallback if currency code is unknown
     return v.toFixed(2) + " " + currency;
   }
 }
@@ -86,6 +89,13 @@ function parseISO(s: string): Date {
   // English: tolerant to missing timezone
   const d = new Date(s);
   return Number.isNaN(+d) ? new Date(s.replace("Z", "")) : d;
+}
+
+function isFiniteNumber(x: unknown): x is number {
+  return typeof x === "number" && Number.isFinite(x);
+}
+function isNonEmptyString(x: unknown): x is string {
+  return typeof x === "string" && x.trim().length > 0;
 }
 
 // ---------- helpers for flexible API fields ----------
@@ -104,13 +114,116 @@ function toISODateYmd(x: unknown): string {
 }
 
 function pickNumber(...candidates: Array<unknown>): number | null {
-  // English: pick the first finite number
+  // English: pick the first finite number (string-to-number tolerant)
   for (const c of candidates) {
     const n = typeof c === "number" ? c : Number(c);
     if (Number.isFinite(n)) return n;
   }
   return null;
 }
+
+/** ---------------- API helpers ---------------- */
+
+// English: get DB-latest quote to anchor the window
+async function fetchLatestQuote(baseUrl: string, symbol: string): Promise<LatestQuote | null> {
+  const qs = new URLSearchParams({ symbol });
+  const resp = await fetch(`${baseUrl}/api/Quotes/latest?${qs.toString()}`, {
+    headers: { Accept: "application/json" },
+  });
+  if (!resp.ok) return null;
+
+  const raw: unknown = await resp.json();
+  if (typeof raw === "object" && raw !== null) {
+    const obj = raw as Record<string, unknown>;
+    const dateCandidate =
+      obj["date"] ?? obj["Date"] ?? obj["tradingDate"] ?? obj["TradingDate"];
+    const closeCandidate = obj["close"] ?? obj["Close"];
+    if (isNonEmptyString(dateCandidate) && isFiniteNumber(closeCandidate)) {
+      return { date: dateCandidate, close: closeCandidate };
+    }
+  }
+  return null;
+}
+
+// English: fetch close timeseries within [from..to] (or backend default if omitted)
+async function fetchTimeseries(
+  baseUrl: string,
+  symbol: string,
+  fromISO?: string,
+  toISO?: string,
+): Promise<Pt[]> {
+  const qs = new URLSearchParams({ symbol });
+  if (fromISO) qs.set("from", fromISO);
+  if (toISO) qs.set("to", toISO);
+
+  const resp = await fetch(`${baseUrl}/api/quotes/timeseries?${qs.toString()}`, {
+    headers: { Accept: "application/json" },
+  });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+
+  const raw: unknown = await resp.json();
+  const arr: TimeseriesApiRow[] = Array.isArray(raw) ? (raw as TimeseriesApiRow[]) : [];
+
+  const pts: Pt[] = arr
+    .map((r): Pt => {
+      const d = r.date ?? r.time ?? r.timestamp ?? r.t ?? null;
+      const c = pickNumber(r.close, r.adjustedClose, r.adjClose, r.c, r.price);
+      return { date: toISODateYmd(d), close: c ?? NaN };
+    })
+    .filter((p) => p.date && Number.isFinite(p.close))
+    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+
+  return pts;
+}
+
+// English: fetch OHLC bars within [from..to]
+async function fetchOhlc(
+  baseUrl: string,
+  symbol: string,
+  fromISO?: string,
+  toISO?: string,
+): Promise<CandlePt[]> {
+  const qs = new URLSearchParams({ symbol });
+  if (fromISO) qs.set("from", fromISO);
+  if (toISO) qs.set("to", toISO);
+
+  const resp = await fetch(`${baseUrl}/api/quotes/ohlc?${qs.toString()}`, {
+    headers: { Accept: "application/json" },
+  });
+  if (!resp.ok) return [];
+
+  const raw: unknown = await resp.json();
+  const arr: OhlcApiRow[] = Array.isArray(raw) ? (raw as OhlcApiRow[]) : [];
+
+  const out: CandlePt[] = arr
+    .map((r): CandlePt => {
+      const d = r.date ?? r.time ?? r.timestamp ?? r.t ?? null;
+      const date = toISODateYmd(d);
+
+      const open = pickNumber(r.open, r.o);
+      const high = pickNumber(r.high, r.h);
+      const low = pickNumber(r.low, r.l);
+      const close = pickNumber(r.close, r.c);
+
+      return {
+        date,
+        open: (open ?? NaN) as number,
+        high: (high ?? NaN) as number,
+        low: (low ?? NaN) as number,
+        close: (close ?? NaN) as number,
+      };
+    })
+    .filter(
+      (c) =>
+        c.date &&
+        [c.open, c.high, c.low, c.close].every((n) => typeof n === "number" && Number.isFinite(n)),
+    )
+    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+
+  return out;
+}
+
+/** ---------------- Component ---------------- */
 
 export default function CompanyCandleChart({
   symbol,
@@ -134,6 +247,7 @@ export default function CompanyCandleChart({
     async function run() {
       if (!sym) {
         setData([]);
+        setCandles([]);
         setLoading(false);
         return;
       }
@@ -141,87 +255,33 @@ export default function CompanyCandleChart({
         setLoading(true);
         setErr(null);
 
-        // English: request last ~6 months from backend
-        const to = new Date();
-        const from = new Date();
-        from.setDate(to.getDate() - 180);
+        // 1) Anchor to DB-latest; otherwise let backend default/fallback handle it
+        const latest = await fetchLatestQuote(backendBase, sym);
 
-        const resp = await fetch(
-          `${backendBase}/api/quotes/timeseries?symbol=${encodeURIComponent(sym)}&from=${fmtDate(
-            from,
-          )}&to=${fmtDate(to)}`,
-          { headers: { Accept: "application/json" } },
-        );
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        let fromISO: string | undefined;
+        let toISO: string | undefined;
 
-        const raw = (await resp.json()) as unknown;
-        const arr: TimeseriesApiRow[] = Array.isArray(raw) ? (raw as TimeseriesApiRow[]) : [];
+        if (latest?.date) {
+          const to = new Date(latest.date);
+          const from = new Date(to);
+          from.setDate(to.getDate() - 180);
+          fromISO = fmtDate(from);
+          toISO = fmtDate(to);
+        }
 
-        // English: tolerant mapping
-        const pts: Pt[] = arr
-          .map((r: TimeseriesApiRow): Pt => {
-            const d = r.date ?? r.time ?? r.timestamp ?? r.t ?? null;
-            const c = pickNumber(r.close, r.adjustedClose, r.adjClose, r.c, r.price);
-            return { date: toISODateYmd(d), close: c ?? NaN };
-          })
-          .filter((p) => p.date && Number.isFinite(p.close));
-
-        // English: ensure chronological order
-        pts.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
-
+        // 2) Load close series (area baseline)
+        const pts = await fetchTimeseries(backendBase, sym, fromISO, toISO);
         if (aborted) return;
         setData(pts);
 
-        // --- Load OHLC into 'candles' (display unchanged) ---
-        try {
-          const resp2 = await fetch(
-            `${backendBase}/api/quotes/ohlc?symbol=${encodeURIComponent(sym)}&from=${fmtDate(from)}&to=${fmtDate(to)}`,
-            { headers: { Accept: "application/json" } },
-          );
-          if (resp2.ok) {
-            const raw2 = (await resp2.json()) as unknown;
-            const arr2: OhlcApiRow[] = Array.isArray(raw2) ? (raw2 as OhlcApiRow[]) : [];
-
-            const out: CandlePt[] = arr2
-              .map((r): CandlePt => {
-                const d = r.date ?? r.time ?? r.timestamp ?? r.t ?? null;
-                const date = toISODateYmd(d);
-
-                const open = pickNumber(r.open, r.o);
-                const high = pickNumber(r.high, r.h);
-                const low = pickNumber(r.low, r.l);
-                const close = pickNumber(r.close, r.c);
-
-                return {
-                  date,
-                  open: (open ?? NaN) as number,
-                  high: (high ?? NaN) as number,
-                  low: (low ?? NaN) as number,
-                  close: (close ?? NaN) as number,
-                };
-              })
-              .filter(
-                (c) =>
-                  c.date &&
-                  [c.open, c.high, c.low, c.close].every(
-                    (n) => typeof n === "number" && Number.isFinite(n),
-                  ),
-              )
-              .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
-
-            if (!aborted) setCandles(out);
-
-            console.debug("candles loaded:", out.length);
-          }
-        } catch {
-          /* ignore OHLC fetch errors for now */
-        }
-
-        // English: follower – no own brush; we do NOT change parent's range here
+        // 3) Load OHLC bars (same window)
+        const bars = await fetchOhlc(backendBase, sym, fromISO, toISO);
+        if (!aborted) setCandles(bars);
       } catch (e) {
         if (aborted) return;
         setErr(e instanceof Error ? e.message : String(e));
         setData([]);
+        setCandles([]);
       } finally {
         if (!aborted) setLoading(false);
       }
@@ -278,7 +338,6 @@ export default function CompanyCandleChart({
   const ohlcByDate = React.useMemo(() => {
     const m = new Map<string, CandlePt>();
     for (const c of candles) {
-      // English: later the tooltip will use label=date to fetch O/H/L/C in O(1)
       if (c.date) m.set(c.date, c);
     }
     return m;
@@ -294,22 +353,14 @@ export default function CompanyCandleChart({
   function CandleTooltip({ active, label }: CandleTooltipProps) {
     if (!active || label == null) return null;
 
-    // English: normalize label (Recharts may give string or number)
     const key = typeof label === "string" ? label : String(label);
-
-    // English: lookup the candle by date (ISO "YYYY-MM-DD")
     const c = ohlcByDate.get(key);
     if (!c) return null;
 
-    // English: day change vs open (absolute and percent)
     const dOpen = c.close - c.open;
     const dOpenPct = c.open ? dOpen / c.open : 0;
-
-    // English: intraday range (high-low), percent vs open
     const rangeAbs = c.high - c.low;
     const rangePct = c.open ? rangeAbs / c.open : 0;
-
-    // English: color for up/down close
     const up = c.close >= c.open;
     const col = up ? "#22c55e" : "#ef4444";
 
@@ -332,7 +383,6 @@ export default function CompanyCandleChart({
         <div>L: {fmtMoney(c.low, currency)}</div>
         <div>C: {fmtMoney(c.close, currency)}</div>
 
-        {/* NEW: range and delta rows */}
         <div style={{ marginTop: 4 }}>
           <div>
             {/* English: intraday range (abs + %) */}
@@ -360,9 +410,7 @@ export default function CompanyCandleChart({
       return null;
     }
 
-    // English: SVG fills the plot area (container handles margins), so no inner padding here
-    const W = 1000,
-      H = 600;
+    const W = 1000, H = 600;
     const step = count > 1 ? W / (count - 1) : W;
     const bodyW = Math.max(1, Math.min(12, Math.floor(step * 0.7)));
 
@@ -410,11 +458,8 @@ export default function CompanyCandleChart({
     );
   }
 
-  // English: read candles once (prepares next step and satisfies lint)
   const candleCount = candles.length;
   const cviewCount = viewCandles.length;
-
-  //console.debug("candles:", candleCount, "viewCandles:", cviewCount);
 
   if (!sym) return null;
 
@@ -485,26 +530,6 @@ export default function CompanyCandleChart({
                   width={50}
                   tickFormatter={(v) => (typeof v === "number" ? v.toFixed(0) : String(v))}
                 />
-                {/* <YAxis
-                  domain={yDomain ?? ["dataMin", "dataMax"]}
-                  width={60} // English: a bit wider for currency symbols
-                  tickFormatter={(v) =>
-                    typeof v === "number" ? fmtMoney(v, currency) : String(v)
-                  }
-                /> */}
-                {/* <Tooltip
-                  formatter={(value: number | string): string => {
-                    const n = typeof value === "number" ? value : Number(value);
-                    return Number.isFinite(n) ? `${n.toFixed(2)} USD` : "n/a";
-                  }}
-                  labelFormatter={(iso) =>
-                    parseISO(String(iso)).toLocaleDateString(undefined, {
-                      year: "numeric",
-                      month: "short",
-                      day: "2-digit",
-                    })
-                  }
-                /> */}
                 <Tooltip
                   content={<CandleTooltip />}
                   wrapperStyle={{ zIndex: 2 }} // English: force tooltip above overlay
@@ -525,7 +550,7 @@ export default function CompanyCandleChart({
             <div
               style={{
                 position: "absolute",
-                // align overlay to the actual plotting area (match AreaChart margins + YAxis width)
+                // English: align overlay to the plotting area (match AreaChart margins + YAxis width)
                 left: 50, // YAxis width
                 right: 12, // chart margin right
                 top: 8, // chart margin top
@@ -538,13 +563,9 @@ export default function CompanyCandleChart({
                 candles={viewCandles}
                 indexByDate={idxByDate}
                 count={view.length}
-                // English: use area view's close-range so Y matches Recharts axis
-                yMin={
-                  yDomain ? yDomain[0] : view.length ? Math.min(...view.map((p) => p.close)) : 0
-                }
-                yMax={
-                  yDomain ? yDomain[1] : view.length ? Math.max(...view.map((p) => p.close)) : 1
-                }
+                // English: use area view's close-range when no explicit yDomain
+                yMin={yDomain ? yDomain[0] : view.length ? Math.min(...view.map((p) => p.close)) : 0}
+                yMax={yDomain ? yDomain[1] : view.length ? Math.max(...view.map((p) => p.close)) : 1}
               />
             </div>
           </div>

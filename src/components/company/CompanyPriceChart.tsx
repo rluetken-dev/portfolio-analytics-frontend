@@ -11,11 +11,30 @@ import {
   Brush,
 } from "recharts";
 
+/** ---------------- Types ---------------- */
 type Pt = { date: string; close: number };
 
-type TimeseriesApiRow = { date?: string | null; close?: number | null }; // API row shape
-type BrushRange = { startIndex?: number; endIndex?: number }; // Recharts Brush payload
+type TimeseriesApiRow = {
+  date?: string | null;
+  close?: number | null;
+};
 
+type BrushRange = { startIndex?: number; endIndex?: number };
+
+type Range = { start: number; end: number } | null;
+
+type Props = {
+  symbol: string;
+  range: Range; // controlled brush window (indices)
+  onRangeChange: (r: Range) => void;
+  currency?: string;
+};
+
+type LatestQuote = { date: string; close: number };
+
+/** ---------------- Utilities ---------------- */
+
+// English: zero-padded yyyy-MM-dd for URL query
 function fmtDate(d: Date) {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
@@ -23,7 +42,7 @@ function fmtDate(d: Date) {
   return `${y}-${m}-${dd}`;
 }
 
-// English: locale-aware money formatter using Intl
+// English: locale-aware money formatter using Intl (safe fallback)
 function fmtMoney(v: number, currency = "USD") {
   if (!Number.isFinite(v)) return "—";
   try {
@@ -33,23 +52,83 @@ function fmtMoney(v: number, currency = "USD") {
       maximumFractionDigits: 2,
     }).format(v);
   } catch {
-    // English: fallback for unknown currency codes
     return `${v.toFixed(2)} ${currency}`;
   }
 }
 
+// English: robust ISO parser (tolerate missing 'Z')
 function parseISO(s: string): Date {
-  // Keep it robust against missing timezone
   const d = new Date(s);
   return Number.isNaN(+d) ? new Date(s.replace("Z", "")) : d;
 }
 
-type Props = {
-  symbol: string;
-  range: { start: number; end: number } | null; // English: controlled brush range (indices)
-  onRangeChange: (r: { start: number; end: number } | null) => void; // English: bubble up changes
-  currency?: string;
-};
+// English: small type guards to avoid 'any'
+function isFiniteNumber(x: unknown): x is number {
+  return typeof x === "number" && Number.isFinite(x);
+}
+function isNonEmptyString(x: unknown): x is string {
+  return typeof x === "string" && x.trim().length > 0;
+}
+
+/** ---------------- API helpers ---------------- */
+
+// English: load latest quote (date + close) for anchoring the time window
+async function fetchLatestQuote(baseUrl: string, symbol: string): Promise<LatestQuote | null> {
+  const qs = new URLSearchParams({ symbol });
+  const resp = await fetch(`${baseUrl}/api/Quotes/latest?${qs.toString()}`, {
+    headers: { Accept: "application/json" },
+  });
+  if (!resp.ok) return null;
+
+  // Avoid 'any' – parse as unknown and narrow at runtime
+  const raw: unknown = await resp.json();
+
+  // Tolerate different shapes: { date, close } OR PascalCase, etc.
+  if (typeof raw === "object" && raw !== null) {
+    const obj = raw as Record<string, unknown>;
+    const dateCandidate =
+      obj["date"] ?? obj["Date"] ?? obj["tradingDate"] ?? obj["TradingDate"];
+    const closeCandidate = obj["close"] ?? obj["Close"];
+
+    if (isNonEmptyString(dateCandidate) && isFiniteNumber(closeCandidate)) {
+      return { date: dateCandidate, close: closeCandidate };
+    }
+  }
+  return null;
+}
+
+// English: fetch timeseries within [from..to]
+async function fetchTimeseries(
+  baseUrl: string,
+  symbol: string,
+  fromISO?: string,
+  toISO?: string,
+): Promise<Pt[]> {
+  const qs = new URLSearchParams({ symbol });
+  if (fromISO) qs.set("from", fromISO);
+  if (toISO) qs.set("to", toISO);
+
+  const resp = await fetch(`${baseUrl}/api/quotes/timeseries?${qs.toString()}`, {
+    headers: { Accept: "application/json" },
+  });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+
+  const raw: unknown = await resp.json();
+  const arr: TimeseriesApiRow[] = Array.isArray(raw) ? (raw as TimeseriesApiRow[]) : [];
+
+  // English: normalize, guard, and sort ascending by date
+  const pts: Pt[] = arr
+    .map((r): Pt => ({
+      date: String(r?.date ?? ""),
+      close: typeof r?.close === "number" ? r.close : NaN,
+    }))
+    .filter((p) => p.date && Number.isFinite(p.close))
+    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+
+  return pts;
+}
+
+/** ---------------- Component ---------------- */
 
 export default function CompanyPriceChart({
   symbol,
@@ -77,38 +156,25 @@ export default function CompanyPriceChart({
         setLoading(true);
         setErr(null);
 
-        // 6M default window
-        const to = new Date();
-        const from = new Date();
-        from.setDate(to.getDate() - 180);
+        // 1) Try anchoring to DB's latest date
+        const latest = await fetchLatestQuote(backendBase, sym);
 
-        const resp = await fetch(
-          `${backendBase}/api/quotes/timeseries?symbol=${encodeURIComponent(sym)}&from=${fmtDate(
-            from,
-          )}&to=${fmtDate(to)}`,
-          { headers: { Accept: "application/json" } },
-        );
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        let pts: Pt[] = [];
+        if (latest?.date) {
+          // English: DB-anchored window [latest-180d .. latest]
+          const to = new Date(latest.date);
+          const from = new Date(to);
+          from.setDate(to.getDate() - 180);
 
-        const raw = (await resp.json()) as unknown;
-        const arr: TimeseriesApiRow[] = Array.isArray(raw) ? (raw as TimeseriesApiRow[]) : [];
-
-        const pts: Pt[] = arr
-          .map(
-            (r): Pt => ({
-              // Defensive parsing to keep chart robust
-              date: String(r?.date ?? ""),
-              close: typeof r?.close === "number" ? r.close : NaN,
-            }),
-          )
-          .filter((p) => p.date && Number.isFinite(p.close));
-
-        // Ensure chronological order
-        pts.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+          pts = await fetchTimeseries(backendBase, sym, fmtDate(from), fmtDate(to));
+        } else {
+          // English: Backend fallback (no dates) – it will use its default window/fallback logic
+          pts = await fetchTimeseries(backendBase, sym);
+        }
 
         if (aborted) return;
         setData(pts);
-        onRangeChange(null);
+        onRangeChange(null); // English: reset brush after reload
       } catch (e) {
         if (aborted) return;
         setErr(e instanceof Error ? e.message : String(e));
@@ -124,6 +190,7 @@ export default function CompanyPriceChart({
     };
   }, [sym, backendBase, onRangeChange]);
 
+  // English: apply current brush window to full data
   const view = React.useMemo(() => {
     if (!data.length) return [];
     if (!range) return data;
@@ -141,7 +208,7 @@ export default function CompanyPriceChart({
 
   const tooltipFmt = React.useCallback(
     (value: number | string): string => {
-      // 2 decimals, USD for now; currency toggle comes later
+      // English: 2 decimals, currently fixed currency
       const n = typeof value === "number" ? value : Number(value);
       return Number.isFinite(n) ? fmtMoney(n, currency) : "n/a";
     },
@@ -150,7 +217,7 @@ export default function CompanyPriceChart({
 
   if (!sym) return null;
 
-  // English: current window as FULL 'data' indices
+  // English: compute current brush indices on FULL data
   const fullMax = Math.max(0, data.length - 1);
   const currentStart = range ? Math.max(0, Math.min(range.start, fullMax)) : 0;
   const currentEnd = range ? Math.max(currentStart, Math.min(range.end, fullMax)) : fullMax;
@@ -268,16 +335,6 @@ export default function CompanyPriceChart({
                 {/* English: hide axes in navigator */}
                 <XAxis dataKey="date" hide />
                 <YAxis domain={["dataMin", "dataMax"]} hide />
-                {/* <Area
-                  type="monotone"
-                  dataKey="close"
-                  stroke="currentColor"
-                  strokeWidth={1}
-                  strokeOpacity={0.6}
-                  fillOpacity={0.08}
-                  dot={false}
-                  isAnimationActive={false}
-                /> */}
                 <Brush
                   dataKey="date"
                   height={26}

@@ -487,10 +487,11 @@ export default function AnalyticsMiniPanel({
         // 1b) Load timeseries (last 180 days) for sparkline, anchored to DB-latest date
         try {
           // English: prefer 'asOf' from cached latest; else query /api/Quotes/latest
-          const fromCached = typeof price?.asOf === "string" && price.asOf.length >= 10 ? price.asOf.slice(0, 10) : null;
-          const latestISO =
-            fromCached ??
-            (await fetchLatestDateISO(backendBase, sym));
+          const fromCached =
+            typeof price?.asOf === "string" && price.asOf.length >= 10
+              ? price.asOf.slice(0, 10)
+              : null;
+          const latestISO = fromCached ?? (await fetchLatestDateISO(backendBase, sym));
 
           let url: string;
           if (latestISO) {
@@ -515,7 +516,9 @@ export default function AnalyticsMiniPanel({
 
           if (tsResp.ok) {
             const raw: unknown = await tsResp.json();
-            const arr = Array.isArray(raw) ? raw as Array<{ date?: unknown; close?: unknown }> : [];
+            const arr = Array.isArray(raw)
+              ? (raw as Array<{ date?: unknown; close?: unknown }>)
+              : [];
 
             // English: defensive parse + chronological sort
             const pts: TimeseriesPoint[] = arr

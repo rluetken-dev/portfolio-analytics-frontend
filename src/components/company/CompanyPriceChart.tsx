@@ -86,8 +86,7 @@ async function fetchLatestQuote(baseUrl: string, symbol: string): Promise<Latest
   // Tolerate different shapes: { date, close } OR PascalCase, etc.
   if (typeof raw === "object" && raw !== null) {
     const obj = raw as Record<string, unknown>;
-    const dateCandidate =
-      obj["date"] ?? obj["Date"] ?? obj["tradingDate"] ?? obj["TradingDate"];
+    const dateCandidate = obj["date"] ?? obj["Date"] ?? obj["tradingDate"] ?? obj["TradingDate"];
     const closeCandidate = obj["close"] ?? obj["Close"];
 
     if (isNonEmptyString(dateCandidate) && isFiniteNumber(closeCandidate)) {
@@ -118,10 +117,12 @@ async function fetchTimeseries(
 
   // English: normalize, guard, and sort ascending by date
   const pts: Pt[] = arr
-    .map((r): Pt => ({
-      date: String(r?.date ?? ""),
-      close: typeof r?.close === "number" ? r.close : NaN,
-    }))
+    .map(
+      (r): Pt => ({
+        date: String(r?.date ?? ""),
+        close: typeof r?.close === "number" ? r.close : NaN,
+      }),
+    )
     .filter((p) => p.date && Number.isFinite(p.close))
     .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
 

@@ -147,29 +147,15 @@ const styles = {
   statusSlot: { minWidth: 80, fontSize: 12, color: "#666" } as CSSProperties,
 } as const;
 
-/** EN: Deterministic sector → color mapping (add your live sectors). */
-const SECTOR_COLORS: Record<string, string> = {
-  Technology: "#3b82f6",
-  "Consumer Cyclical": "#f59e0b",
-  "Consumer Defensive": "#22c55e",
-  Healthcare: "#ef4444",
-  Financial: "#8b5cf6",
-  "Financial Services": "#8b5cf6",
-  Industrials: "#14b8a6",
-  Energy: "#eab308",
-  Utilities: "#06b6d4",
-  Materials: "#a855f7",
-  "Real Estate": "#f97316",
-  Communication: "#0ea5e9",
-  "Communication Services": "#0ea5e9",
-  Unknown: "#6b7280",
-};
+/** EN: Simple categorical palette (wraps via modulo). */
+const CHART_PALETTE = [
+  "#3b82f6", "#22c55e", "#f59e0b", "#ef4444", "#8b5cf6",
+  "#14b8a6", "#f7e19fff", "#06b6d4", "#a855f7", "#f97316",
+  "#0ea5e9", "#10b981", "#f43f5e", "#84cc16", "#6366f1",
+];
 
-/** EN: Normalize and pick a color; fallback to gray. */
-function colorForSector(name?: string): string {
-  const key = (name || "Unknown").trim();
-  return SECTOR_COLORS[key] ?? SECTOR_COLORS[key.replace(/\s+/g, " ")] ?? "#6b7280";
-}
+/** EN: Deterministic color by slice index (stable via order). */
+const colorByIndex = (i: number): string => CHART_PALETTE[i % CHART_PALETTE.length];
 
 /** ------------------------------------------------------------------
  * Shape returned by backend /api/companies (+ refresh-profile)
@@ -831,8 +817,8 @@ export default function Companies() {
                   label={({ name }) => String(name)} // EN: show sector name on slices
                   labelLine
                 >
-                  {sectorData.map((d, i) => (
-                    <Cell key={`cell-${i}`} fill={colorForSector(d.sector)} />
+                  {sectorData.map((d, i) => (                    
+                     <Cell key={`cell-${i}`} fill={colorByIndex(i)} /> 
                   ))}
                 </Pie>
                 <Tooltip />
@@ -843,10 +829,10 @@ export default function Companies() {
           {/* Simple legend */}
           {sectorData.length > 0 && (
             <div style={styles.legendWrap} aria-label="Sector legend">
-              {sectorData.map((d) => (
+              {sectorData.map((d, i) => (
                 <div key={d.sector} style={styles.legendItem} title={d.sector}>
-                  <span
-                    style={{ ...styles.legendSwatch, background: colorForSector(d.sector) }}
+                  <span                 
+                    style={{ ...styles.legendSwatch, background: colorByIndex(i) }} 
                     aria-hidden="true"
                   />
                   <span>{d.sector}</span>

@@ -6,6 +6,7 @@ import { Tooltip, ResponsiveContainer, Cell, PieChart, Pie } from "recharts";
 import { useNavigate } from "react-router-dom";
 import CompanyDiscovery from "../components/CompanyDiscovery";
 import Notification from "../components/Notification";
+import ConfirmDialog from "../components/ConfirmDialog";
 
 // English comment: add the small analytics panel component
 import AnalyticsMiniPanel from "../components/AnalyticsMiniPanel";
@@ -200,6 +201,12 @@ export default function Companies() {
     type: "success" | "error" | "info";
   } | null>(null);
 
+  // State for delete confirmation dialog
+  const [confirmDelete, setConfirmDelete] = useState<{
+    isOpen: boolean;
+    symbol: string;
+  } | null>(null);
+
   // English: anchor to scroll the analytics panel into view (optional)
   const analyticsRef = useRef<HTMLDivElement | null>(null);
 
@@ -376,17 +383,20 @@ export default function Companies() {
         // refresh the companies list
         await load({ q: query });
 
-        // show success notification instead of alert
+        // show success notification
         showNotification(`Company ${symbol} removed successfully`, "success");
 
         // clear selection if the removed company was selected
         if (selectedSymbol === symbol) {
           setSelectedSymbol("");
         }
+
+        // close the confirm dialog
+        setConfirmDelete(null);
       } catch (error) {
         console.error("Remove failed:", error);
 
-        // show error notification instead of alert
+        // show error notification
         const errorMessage = error instanceof Error ? error.message : String(error);
         if (errorMessage.includes("has associated financial data")) {
           showNotification(`Cannot remove ${symbol}: Has financial data`, "error");
@@ -826,7 +836,7 @@ export default function Companies() {
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
-                                removeCompany(sym); // This already uses notifications now
+                                setConfirmDelete({ isOpen: true, symbol: sym });
                               }}
                               onKeyDown={(e) => {
                                 if (e.key === "Enter" || e.key === " ") {
@@ -971,6 +981,21 @@ export default function Companies() {
             <em>Unknown</em>.
           </p>
         </div>
+      )}
+      {/* Delete confirmation dialog */}
+      {confirmDelete && (
+        <ConfirmDialog
+          isOpen={confirmDelete.isOpen}
+          title="Confirm Delete"
+          message={`Are you sure you want to remove ${confirmDelete.symbol} from the database? This action cannot be undone.`}
+          confirmText="Delete"
+          cancelText="Cancel"
+          variant="danger"
+          onConfirm={() => {
+            removeCompany(confirmDelete.symbol);
+          }}
+          onCancel={() => setConfirmDelete(null)}
+        />
       )}
     </div>
   );

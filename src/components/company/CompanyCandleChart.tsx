@@ -418,7 +418,8 @@ export default function CompanyCandleChart({
       return null;
     }
 
-    const W = 1000, H = 600;
+    const W = 1000,
+      H = 600;
     const step = count > 1 ? W / (count - 1) : W;
     const bodyW = Math.max(1, Math.min(12, Math.floor(step * 0.7)));
 
@@ -572,8 +573,12 @@ export default function CompanyCandleChart({
                 indexByDate={idxByDate}
                 count={view.length}
                 // English: use area view's close-range when no explicit yDomain
-                yMin={yDomain ? yDomain[0] : view.length ? Math.min(...view.map((p) => p.close)) : 0}
-                yMax={yDomain ? yDomain[1] : view.length ? Math.max(...view.map((p) => p.close)) : 1}
+                yMin={
+                  yDomain ? yDomain[0] : view.length ? Math.min(...view.map((p) => p.close)) : 0
+                }
+                yMax={
+                  yDomain ? yDomain[1] : view.length ? Math.max(...view.map((p) => p.close)) : 1
+                }
               />
             </div>
           </div>

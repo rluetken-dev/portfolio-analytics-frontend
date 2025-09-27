@@ -4,6 +4,8 @@ import type { CSSProperties } from "react";
 import { fetchJson } from "../services/api/client";
 import { Tooltip, ResponsiveContainer, Cell, PieChart, Pie } from "recharts";
 import { useNavigate } from "react-router-dom";
+import CompanyDiscovery from "../components/CompanyDiscovery";
+import Notification from "../components/Notification";
 
 // English comment: add the small analytics panel component
 import AnalyticsMiniPanel from "../components/AnalyticsMiniPanel";
@@ -149,9 +151,21 @@ const styles = {
 
 /** EN: Simple categorical palette (wraps via modulo). */
 const CHART_PALETTE = [
-  "#3b82f6", "#22c55e", "#f59e0b", "#ef4444", "#8b5cf6",
-  "#14b8a6", "#f7e19fff", "#06b6d4", "#a855f7", "#f97316",
-  "#0ea5e9", "#10b981", "#f43f5e", "#84cc16", "#6366f1",
+  "#3b82f6",
+  "#22c55e",
+  "#f59e0b",
+  "#ef4444",
+  "#8b5cf6",
+  "#14b8a6",
+  "#f7e19fff",
+  "#06b6d4",
+  "#a855f7",
+  "#f97316",
+  "#0ea5e9",
+  "#10b981",
+  "#f43f5e",
+  "#84cc16",
+  "#6366f1",
 ];
 
 /** EN: Deterministic color by slice index (stable via order). */
@@ -179,7 +193,12 @@ export default function Companies() {
   const [sectorFilter, setSectorFilter] = useState<string>("All"); // EN: Sector filter (All = no filter)
 
   // English: selected symbol to show in the analytics panel
-  const [selectedSymbol, setSelectedSymbol] = useState<string>(""); // English: start empty
+  const [selectedSymbol, setSelectedSymbol] = useState<string>("");
+
+  const [notification, setNotification] = useState<{
+    message: string;
+    type: "success" | "error" | "info";
+  } | null>(null);
 
   // English: anchor to scroll the analytics panel into view (optional)
   const analyticsRef = useRef<HTMLDivElement | null>(null);
@@ -220,6 +239,18 @@ export default function Companies() {
     },
     [limit],
   );
+
+  const showNotification = useCallback((message: string, type: "success" | "error" | "info") => {
+    setNotification({ message, type });
+  }, []);
+
+  const hideNotification = useCallback(() => {
+    setNotification(null);
+  }, []);
+
+  const handleCompanyAdded = useCallback(() => {
+    void load(); // reload companies list
+  }, [load]);
 
   // Initial load on mount
   useEffect(() => {
@@ -330,6 +361,42 @@ export default function Companies() {
       setBatchBusy(false);
     }
   };
+
+  // remove company with safety confirmation
+  const removeCompany = useCallback(
+    async (symbol: string) => {
+      if (!symbol) return;
+
+      try {
+        await fetchJson({
+          path: `/api/companies/${encodeURIComponent(symbol)}`,
+          method: "DELETE",
+        });
+
+        // refresh the companies list
+        await load({ q: query });
+
+        // show success notification instead of alert
+        showNotification(`Company ${symbol} removed successfully`, "success");
+
+        // clear selection if the removed company was selected
+        if (selectedSymbol === symbol) {
+          setSelectedSymbol("");
+        }
+      } catch (error) {
+        console.error("Remove failed:", error);
+
+        // show error notification instead of alert
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        if (errorMessage.includes("has associated financial data")) {
+          showNotification(`Cannot remove ${symbol}: Has financial data`, "error");
+        } else {
+          showNotification(`Failed to remove ${symbol}`, "error");
+        }
+      }
+    },
+    [load, query, selectedSymbol, showNotification],
+  );
 
   // EN: Unique sectors from current data (sorted, with "All" first)
   const sectors = useMemo(() => {
@@ -445,6 +512,15 @@ export default function Companies() {
 
   return (
     <div style={styles.page}>
+      <CompanyDiscovery onCompanyAdded={handleCompanyAdded} onNotification={showNotification} />
+      {/* Always show notification (if any), independent of charts */}
+      {notification && (
+        <Notification
+          message={notification.message}
+          type={notification.type}
+          onClose={hideNotification}
+        />
+      )}
       {/* Header + actions */}
       <div style={styles.headerRow}>
         <h2 style={styles.title}>🏢 Companies</h2>
@@ -698,52 +774,101 @@ export default function Companies() {
                         }}
                       >
                         {isSelected && (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation(); // keep current row selection
-                              navigate(`/company/${sym}`); // go to detail route /company/:symbol
-                            }}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter" || e.key === " ") {
+                          <>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation(); // keep current row selection
+                                navigate(`/company/${sym}`); // go to detail route /company/:symbol
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter" || e.key === " ") {
+                                  e.stopPropagation();
+                                  navigate(`/company/${sym}`);
+                                }
+                              }}
+                              title={`Details zu ${sym} öffnen`}
+                              aria-label={`Open details for ${sym}`}
+                              style={{
+                                // compact, unobtrusive action pill
+                                padding: "2px 6px",
+                                borderRadius: 8,
+                                fontSize: 11,
+                                lineHeight: 1.2,
+                                cursor: "pointer",
+
+                                // green accent to stand out on dark rows
+                                border: "1px solid #22c55e", // green-500
+                                background: "rgba(34, 197, 94, 0.12)", // soft green fill
+                                color: "#dcfce7", // green-100 text for contrast
+
+                                // small visual polish
+                                boxShadow: "0 0 0 0 rgba(34,197,94,0)",
+                                transition: "box-shadow 120ms ease, transform 60ms ease",
+                              }}
+                              onMouseDown={(e) => {
+                                // quick press feedback without layout shift
+                                e.currentTarget.style.transform = "translateY(1px)";
+                                e.currentTarget.style.boxShadow = "0 0 0 2px rgba(34,197,94,0.25)";
+                              }}
+                              onMouseUp={(e) => {
+                                e.currentTarget.style.transform = "translateY(0)";
+                                e.currentTarget.style.boxShadow = "0 0 0 0 rgba(34,197,94,0)";
+                              }}
+                              onMouseLeave={(e) => {
+                                e.currentTarget.style.transform = "translateY(0)";
+                                e.currentTarget.style.boxShadow = "0 0 0 0 rgba(34,197,94,0)";
+                              }}
+                            >
+                              Details
+                            </button>
+
+                            {/* Remove Button */}
+                            <button
+                              onClick={(e) => {
                                 e.stopPropagation();
-                                navigate(`/company/${sym}`);
-                              }
-                            }}
-                            title={`Details zu ${sym} öffnen`}
-                            aria-label={`Open details for ${sym}`}
-                            style={{
-                              // compact, unobtrusive action pill
-                              padding: "2px 6px",
-                              borderRadius: 8,
-                              fontSize: 11,
-                              lineHeight: 1.2,
-                              cursor: "pointer",
+                                removeCompany(sym); // This already uses notifications now
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter" || e.key === " ") {
+                                  e.stopPropagation();
+                                }
+                              }}
+                              title={`Remove ${sym} from database`}
+                              aria-label={`Remove ${sym} from database`}
+                              style={{
+                                // compact, unobtrusive action pill
+                                padding: "2px 6px",
+                                borderRadius: 8,
+                                fontSize: 11,
+                                lineHeight: 1.2,
+                                cursor: "pointer",
 
-                              // green accent to stand out on dark rows
-                              border: "1px solid #22c55e", // green-500
-                              background: "rgba(34, 197, 94, 0.12)", // soft green fill
-                              color: "#dcfce7", // green-100 text for contrast
+                                // red accent for remove action
+                                border: "1px solid #ef4444", // red-500
+                                background: "rgba(239, 68, 68, 0.12)", // soft red fill
+                                color: "#fecaca", // red-200 text for contrast
 
-                              // small visual polish
-                              boxShadow: "0 0 0 0 rgba(34,197,94,0)",
-                              transition: "box-shadow 120ms ease, transform 60ms ease",
-                            }}
-                            onMouseDown={(e) => {
-                              // quick press feedback without layout shift
-                              e.currentTarget.style.transform = "translateY(1px)";
-                              e.currentTarget.style.boxShadow = "0 0 0 2px rgba(34,197,94,0.25)";
-                            }}
-                            onMouseUp={(e) => {
-                              e.currentTarget.style.transform = "translateY(0)";
-                              e.currentTarget.style.boxShadow = "0 0 0 0 rgba(34,197,94,0)";
-                            }}
-                            onMouseLeave={(e) => {
-                              e.currentTarget.style.transform = "translateY(0)";
-                              e.currentTarget.style.boxShadow = "0 0 0 0 rgba(34,197,94,0)";
-                            }}
-                          >
-                            Details
-                          </button>
+                                // small visual polish
+                                boxShadow: "0 0 0 0 rgba(239,68,68,0)",
+                                transition: "box-shadow 120ms ease, transform 60ms ease",
+                              }}
+                              onMouseDown={(e) => {
+                                // quick press feedback without layout shift
+                                e.currentTarget.style.transform = "translateY(1px)";
+                                e.currentTarget.style.boxShadow = "0 0 0 2px rgba(239,68,68,0.25)";
+                              }}
+                              onMouseUp={(e) => {
+                                e.currentTarget.style.transform = "translateY(0)";
+                                e.currentTarget.style.boxShadow = "0 0 0 0 rgba(239,68,68,0)";
+                              }}
+                              onMouseLeave={(e) => {
+                                e.currentTarget.style.transform = "translateY(0)";
+                                e.currentTarget.style.boxShadow = "0 0 0 0 rgba(239,68,68,0)";
+                              }}
+                            >
+                              Remove
+                            </button>
+                          </>
                         )}
 
                         {needsRefresh ? (
@@ -818,7 +943,7 @@ export default function Companies() {
                   labelLine
                 >
                   {sectorData.map((d, i) => (
-                    <Cell key={`cell-${d.sector}-${i}`} fill={colorByIndex(i)} />  
+                    <Cell key={`cell-${d.sector}-${i}`} fill={colorByIndex(i)} />
                   ))}
                 </Pie>
                 <Tooltip />
@@ -831,8 +956,8 @@ export default function Companies() {
             <div style={styles.legendWrap} aria-label="Sector legend">
               {sectorData.map((d, i) => (
                 <div key={d.sector} style={styles.legendItem} title={d.sector}>
-                  <span                 
-                    style={{ ...styles.legendSwatch, background: colorByIndex(i) }} 
+                  <span
+                    style={{ ...styles.legendSwatch, background: colorByIndex(i) }}
                     aria-hidden="true"
                   />
                   <span>{d.sector}</span>

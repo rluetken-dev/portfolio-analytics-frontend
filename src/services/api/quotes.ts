@@ -1,47 +1,68 @@
 // src/services/api/quotes.ts
 import type { LatestMetricWithStatus } from "../../types/analytics";
 
+type QuoteRow = {
+  date?: string;
+  close?: number;
+  adjustedClose?: number;
+  source?: string;
+};
+
 export async function getLatestCloseFromQuotes(symbol: string): Promise<LatestMetricWithStatus> {
-  // English: normalize symbol
   const sym = (symbol ?? "").trim().toUpperCase();
   if (!sym) {
-    // treat as bad request on empty symbol
-    return { symbol: sym, value: null, unit: "USD", status: 400 };
+    return {
+      symbol: sym,
+      value: null,
+      unit: "USD",
+      status: 400,
+      error: "Symbol required",
+      retryAfterSec: undefined,
+    };
   }
 
   try {
-    // Call backend directly (bypass Vite proxy during dev)
     const url = `http://localhost:5046/api/quotes/latest?symbol=${encodeURIComponent(sym)}&take=1`;
-
-    const resp = await fetch(url, {
-      method: "GET",
-      headers: { Accept: "application/json" },
-    });
+    const resp = await fetch(url, { method: "GET", headers: { Accept: "application/json" } });
 
     if (!resp.ok) {
-      // Surface HTTP error code to UI
-      return { symbol: sym, value: null, unit: "USD", status: resp.status };
+      // Special handling for 429
+      if (resp.status === 429) {
+        const err = await resp.json();
+        const retryAfterHeader = resp.headers.get("Retry-After");
+        const retryAfterSec = retryAfterHeader ? parseInt(retryAfterHeader, 10) : undefined;
+
+        return {
+          symbol: sym,
+          value: null,
+          unit: "USD",
+          status: 429,
+          error: err.detail || "Rate limit reached – please try again later",
+          retryAfterSec,
+        };
+      }
+
+      // Generic error case
+      return {
+        symbol: sym,
+        value: null,
+        unit: "USD",
+        status: resp.status,
+        retryAfterSec: undefined,
+      };
     }
 
-    const rows = (await resp.json()) as unknown;
-
+    const rows = (await resp.json()) as QuoteRow[];
     if (!Array.isArray(rows) || rows.length === 0) {
-      // No cached rows → behave like 404
-      return { symbol: sym, value: null, unit: "USD", status: 404 };
+      return { symbol: sym, value: null, unit: "USD", status: 404, retryAfterSec: undefined };
     }
 
-    const r = rows[0] as {
-      date?: string;
-      close?: number;
-      adjustedClose?: number;
-      source?: string;
-    };
-
+    const r = rows[0];
     const hasAdj = typeof r.adjustedClose === "number";
-    const val = hasAdj
-      ? (r.adjustedClose as number)
+    const val: number | null = hasAdj
+      ? r.adjustedClose!
       : typeof r.close === "number"
-        ? (r.close as number)
+        ? r.close!
         : null;
 
     return {
@@ -51,12 +72,19 @@ export async function getLatestCloseFromQuotes(symbol: string): Promise<LatestMe
       adjusted: hasAdj,
       source: r.source,
       unit: "USD",
-      status: 200, // success
+      status: 200,
+      retryAfterSec: undefined, // success has no retry hint
     };
   } catch (err) {
     console.error("[quotes] getLatestCloseFromQuotes failed:", err);
-    // Network/parse error → generic 500
-    return { symbol: sym, value: null, unit: "USD", status: 500 };
+    return {
+      symbol: sym,
+      value: null,
+      unit: "USD",
+      status: 500,
+      error: String(err),
+      retryAfterSec: undefined,
+    };
   }
 }
 
@@ -94,19 +122,37 @@ export type CurrentQuote = {
   price: number | null;
   latestTradingDay?: string;
   status: number;
+  error?: string;
+  retryAfterSec?: number;
 };
 
 export async function getCurrentPrice(symbol: string): Promise<CurrentQuote> {
   const sym = (symbol ?? "").trim().toUpperCase();
-  if (!sym) return { symbol: sym, price: null, status: 400 };
+  if (!sym) return { symbol: sym, price: null, status: 400, error: "Symbol required" };
 
   try {
     const url = `http://localhost:5046/api/quotes/current?symbol=${encodeURIComponent(sym)}`;
     const resp = await fetch(url, { headers: { Accept: "application/json" } });
 
     if (!resp.ok) {
-      // English: surface HTTP code for UI hinting
-      return { symbol: sym, price: null, status: resp.status };
+      let errDetail: string | undefined;
+      try {
+        const errBody = await resp.json();
+        errDetail = errBody.detail;
+      } catch {
+        /* ignore parse error */
+      }
+
+      const retryAfterHeader = resp.headers.get("Retry-After");
+      const retryAfterSec = retryAfterHeader ? parseInt(retryAfterHeader, 10) : undefined;
+
+      return {
+        symbol: sym,
+        price: null,
+        status: resp.status,
+        error: errDetail || `HTTP ${resp.status} error`,
+        retryAfterSec,
+      };
     }
 
     const data = (await resp.json()) as {
@@ -121,8 +167,7 @@ export async function getCurrentPrice(symbol: string): Promise<CurrentQuote> {
       latestTradingDay: data.latestTradingDay,
       status: 200,
     };
-  } catch {
-    // English: network/parse error
-    return { symbol: sym, price: null, status: 500 };
+  } catch (e) {
+    return { symbol: sym, price: null, status: 500, error: String(e) };
   }
 }

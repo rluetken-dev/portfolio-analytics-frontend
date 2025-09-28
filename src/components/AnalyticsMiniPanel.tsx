@@ -4,6 +4,9 @@ import { getLatestCloseFromQuotes } from "../services/api/quotes";
 import { refreshQuotes } from "../services/api/quotes";
 import { fetchFundamentalsSnapshot, type SnapshotResult } from "../services/api/fundamentals";
 import { refreshFundamentals } from "../services/api/fundamentals";
+import { toApiMessage } from "../utils/statusMessages";
+import { toErrorPillMessage } from "../utils/statusMessages";
+import { fetchLatestDateISO } from "../utils/dateUtils";
 
 // English: live price (non-persistent) fetcher
 import { getCurrentPrice, type CurrentQuote } from "../services/api/quotes";
@@ -212,61 +215,6 @@ function StatusPill({
         ? { borderColor: "#f5c2c7", background: "#fff6f6" }
         : { borderColor: "#ddd", background: "#f7f7f7" };
   return <span style={{ ...base, ...theme }}>{children}</span>;
-}
-
-// English: turn raw error (stack/JSON) into a short, user-friendly message
-function toUserMessage(err: unknown): string {
-  const raw = err instanceof Error ? err.message : String(err ?? "Unknown error");
-  const low = raw.toLowerCase();
-
-  // English: identify common upstream cases (FMP free tier / rate limit)
-  if (
-    low.includes("402 payment required") ||
-    low.includes("premium query parameter") ||
-    low.includes("not available under your current subscription") ||
-    low.includes("subscription page")
-  ) {
-    return "Upstream free-tier limit for this symbol (FMP). Nothing saved.";
-  }
-
-  if (low.includes("429 too many requests") || low.includes("limit reach")) {
-    return "Upstream rate limit reached (FMP). Please try again later.";
-  }
-
-  // English: generic gateway error
-  if (low.includes("502 bad gateway") || low.includes("bad gateway")) {
-    return "Backend temporarily unavailable. Please retry.";
-  }
-
-  // English: final fallback — trim very long texts
-  return raw.length > 140 ? raw.slice(0, 140) + "…" : raw;
-}
-
-// English: read DB-latest date for anchoring the 180d window
-async function fetchLatestDateISO(baseUrl: string, symbol: string): Promise<string | null> {
-  const qs = new URLSearchParams({ symbol });
-  const resp = await fetch(`${baseUrl}/api/Quotes/latest?${qs.toString()}`, {
-    headers: { Accept: "application/json" },
-  });
-  if (!resp.ok) return null;
-
-  // English: tolerate different shapes/keys for the date field
-  const raw: unknown = await resp.json();
-  if (typeof raw === "object" && raw !== null) {
-    const o = raw as Record<string, unknown>;
-    const d =
-      o["date"] ??
-      o["Date"] ??
-      o["tradingDate"] ??
-      o["TradingDate"] ??
-      o["asOf"] ?? // sometimes 'asOf' is already yyyy-MM-dd
-      null;
-    if (typeof d === "string" && d.length >= 10) {
-      // English: normalize to yyyy-MM-dd
-      return d.slice(0, 10);
-    }
-  }
-  return null;
 }
 
 // English: optional initial symbol + notify parent when active symbol changes
@@ -1108,38 +1056,37 @@ export default function AnalyticsMiniPanel({
             <button
               onClick={async () => {
                 try {
-                  setPriceBusy(true);
+                  setPriceBusy(true); // English: local busy state
                   setErr(null);
                   setPriceFetchErr(null);
                   setPriceFetchStatus(null);
 
-                  // English: trigger backend refresh (fetch & persist recent closes)
+                  // English: trigger backend refresh (fetch & persist)
                   await refreshQuotes(currentSym, "24m");
 
-                  // English: verify persistence by asking the cache directly
+                  // English: verify persistence by asking cache directly
                   const after = await getLatestCloseFromQuotes(currentSym);
 
-                  if (after.status === 200 && typeof after.value === "number") {
-                    // English: success only if a numeric price is now present
-                    setPriceFetchStatus(
-                      `Price data (${currentSym}): loaded & saved (HTTP ${after.status}).`,
+                  // ✅ unified status line
+                  const statusMsg = toApiMessage(currentSym, after.status ?? 500, after.error);
+                  setPriceFetchStatus(statusMsg);
+
+                  // ✅ error pill (only on error)
+                  if (after.status !== 200 || typeof after.value !== "number") {
+                    const pillMsg = toErrorPillMessage(
+                      after.status ?? 500,
+                      after.error,
+                      after.retryAfterSec,
                     );
-                    // English: optionally refresh the whole panel (kept here)
-                    await load();
+                    setPriceFetchErr(pillMsg);
                   } else {
-                    // English: refresh returned but no cached price is available
-                    setPriceFetchStatus(
-                      `Price data (${currentSym}): still unavailable (HTTP ${after.status}).`,
-                    );
-                    setPriceFetchErr(
-                      toUserMessage(
-                        new Error(`HTTP ${after.status}: no cached price after refresh`),
-                      ),
-                    );
+                    // optionally reload panel if success
+                    await load();
                   }
                 } catch (e) {
-                  setPriceFetchErr(toUserMessage(e));
-                  setPriceFetchStatus(`Price data (${currentSym}): failed.`);
+                  const statusMsg = toApiMessage(currentSym, 500, String(e));
+                  setPriceFetchStatus(statusMsg);
+                  setPriceFetchErr("Server error");
                 } finally {
                   setPriceBusy(false);
                 }
@@ -1182,22 +1129,24 @@ export default function AnalyticsMiniPanel({
                 const startSym = currentSym; // English: capture symbol at click time
                 const q = await getCurrentPrice(startSym);
 
-                // English: keep original 'live' for your delta badge in Price card
-                if (startSym === currentSym) setLive(q);
+                // ✅ store live price so the Price row can compute the delta
+                if (startSym === currentSym) {
+                  setLive(q);
+                }
 
-                // English: persistent status line (always set after click)
-                const status =
-                  `Live price (${q.symbol ?? startSym}): ` +
-                  `${typeof q.price === "number" ? q.price.toFixed(2) + " USD" : "n/a"}` +
-                  `${q.latestTradingDay ? ` — ${q.latestTradingDay}` : ""}` +
-                  ` (HTTP ${q.status})`;
-                setLiveStatus(status);
-                if (q.status !== 200 || typeof q.price !== "number") {
-                  setLiveErr(toUserMessage(new Error(`HTTP ${q.status}: live price unavailable`)));
+                // ✅ status line (always shown, long message)
+                const statusMsg = toApiMessage(q.symbol ?? startSym, q.status, q.error);
+                setLiveStatus(statusMsg);
+
+                // ✅ error pill (short message, only on error)
+                if (q.status !== 200) {
+                  const pillMsg = toErrorPillMessage(q.status, q.error, q.retryAfterSec);
+                  setLiveErr(pillMsg);
                 }
               } catch (e) {
-                setLiveErr(toUserMessage(e));
-                setLiveStatus(`live (${currentSym}): n/a (HTTP 500)`);
+                const statusMsg = toApiMessage(currentSym, 500, String(e));
+                setLiveStatus(statusMsg);
+                setLiveErr("Server error"); // short pill message
               } finally {
                 setLiveBusy(false);
               }
@@ -1217,7 +1166,7 @@ export default function AnalyticsMiniPanel({
             {liveBusy ? "Fetching…" : "Get live price"}
           </button>
 
-          {/* English: transient error pill + persistent status line */}
+          {/* English: persistent status line + optional error pill */}
           {liveStatus && <span style={{ fontSize: 12, opacity: 0.7 }}>{liveStatus}</span>}
           {liveErr && <StatusPill kind="err">{liveErr}</StatusPill>}
         </div>
@@ -1239,26 +1188,19 @@ export default function AnalyticsMiniPanel({
                   const res = await fetchFundamentalsSnapshot(currentSym, "annual", 5);
                   setFundRes(res);
 
-                  if (res.status === 200 && res.data) {
-                    setFundSnapStatus(
-                      `Fundamentals (${currentSym}): snapshot received (HTTP ${res.status})`,
-                    );
-                  } else {
-                    setFundSnapStatus(
-                      `Fundamentals (${currentSym}): ${res.status === 200 ? "no data" : "unavailable"} (HTTP ${res.status})`,
-                    );
-                    if (res.status !== 200) {
-                      setFundSnapErr(
-                        toUserMessage(
-                          new Error(`HTTP ${res.status}: fundamentals snapshot unavailable`),
-                        ),
-                      );
-                    }
+                  // ✅ status line (always shown, long message)
+                  const statusMsg = toApiMessage(currentSym, res.status);
+                  setFundSnapStatus(statusMsg);
+
+                  // ✅ error pill (short message, only on error)
+                  if (res.status !== 200) {
+                    const pillMsg = toErrorPillMessage(res.status);
+                    setFundSnapErr(pillMsg);
                   }
                 } catch (e) {
-                  // English: concise pill + short status
-                  setFundSnapErr(toUserMessage(e));
-                  setFundSnapStatus("Fundamentals: failed.");
+                  const statusMsg = toApiMessage(currentSym, 500, String(e));
+                  setFundSnapStatus(statusMsg);
+                  setFundSnapErr("Server error"); // short pill message
                 } finally {
                   setFundBusy(false);
                 }
@@ -1279,7 +1221,7 @@ export default function AnalyticsMiniPanel({
             </button>
           )}
 
-          {/* English: transient error pill + persistent status line */}
+          {/* English: persistent status line + optional error pill */}
           {fundSnapStatus && <span style={{ fontSize: 12, opacity: 0.7 }}>{fundSnapStatus}</span>}
           {fundSnapErr && <StatusPill kind="err">{fundSnapErr}</StatusPill>}
         </div>
@@ -1299,7 +1241,7 @@ export default function AnalyticsMiniPanel({
 
                   const res = await refreshFundamentals(currentSym, "annual", 5);
 
-                  // English: build persistent status line (no success pill, only errors show a pill)
+                  // ✅ build custom success message
                   const allZero =
                     (res.inserted?.income ?? 0) === 0 &&
                     (res.inserted?.balance ?? 0) === 0 &&
@@ -1308,21 +1250,27 @@ export default function AnalyticsMiniPanel({
                     (res.skipped?.balance ?? 0) === 0 &&
                     (res.skipped?.cash ?? 0) === 0;
 
-                  setFundSaveStatus(
-                    allZero
-                      ? `Save fundamentals (${res.symbol}): no changes (up-to-date or free tier).`
-                      : `Save fundamentals (${res.symbol}): income +${res.inserted?.income ?? 0}/${res.skipped?.income ?? 0}, ` +
-                          `balance +${res.inserted?.balance ?? 0}/${res.skipped?.balance ?? 0}, ` +
-                          `cash +${res.inserted?.cash ?? 0}/${res.skipped?.cash ?? 0}`,
-                  );
+                  const statusMsg = allZero
+                    ? `✔️ Save fundamentals (${res.symbol}): no changes (up-to-date or free tier).`
+                    : `✔️ Save fundamentals (${res.symbol}): income +${res.inserted?.income ?? 0}/${res.skipped?.income ?? 0}, ` +
+                      `balance +${res.inserted?.balance ?? 0}/${res.skipped?.balance ?? 0}, ` +
+                      `cash +${res.inserted?.cash ?? 0}/${res.skipped?.cash ?? 0}`;
 
-                  setFundSaveStatus(status);
+                  setFundSaveStatus(statusMsg);
 
-                  // English: reload so analytics can pick up newly persisted data
+                  // ✅ reload so analytics can pick up newly persisted data
                   await load();
                 } catch (e) {
-                  setFundSaveStatus(`Save fundamentals (${currentSym}): failed.`);
-                  setFundErr(toUserMessage(e));
+                  // safely extract error message
+                  const errMsg = e instanceof Error ? e.message : String(e);
+
+                  // ❌ use unified messages for error cases
+                  const statusMsg = toApiMessage(currentSym, 500, errMsg);
+                  setFundSaveStatus(statusMsg);
+
+                  const pillMsg = toErrorPillMessage(500, errMsg);
+                  setFundErr(pillMsg);
+
                   console.warn("[panel] fundamentals refresh failed:", e);
                 } finally {
                   setFundBusy(false);
@@ -1344,7 +1292,7 @@ export default function AnalyticsMiniPanel({
             </button>
           )}
 
-          {/* English: transient error pill + persistent status line */}
+          {/* English: persistent status line + optional error pill */}
           {fundSaveStatus && <span style={{ fontSize: 12, opacity: 0.7 }}>{fundSaveStatus}</span>}
           {fundErr && <StatusPill kind="err">{fundErr}</StatusPill>}
         </div>

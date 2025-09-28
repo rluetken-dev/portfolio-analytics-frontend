@@ -16,6 +16,8 @@ export type LatestMetric<T = number> = {
 // Extends LatestMetric with an optional HTTP status for error hints
 export type LatestMetricWithStatus<T = number> = LatestMetric<T> & {
   status?: number;
+  error?: string;
+  retryAfterSec?: number;
 };
 
 /**

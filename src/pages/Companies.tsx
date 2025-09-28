@@ -376,7 +376,7 @@ export default function Companies() {
 
       try {
         await fetchJson({
-          path: `/api/companies/${encodeURIComponent(symbol)}`,
+          path: `/api/admin/tickers/${encodeURIComponent(symbol)}`,
           method: "DELETE",
         });
 

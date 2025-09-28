@@ -129,6 +129,12 @@ export async function fetchJson<TResponse = unknown, TBody = unknown>(
               (maybeJson.message ? ` — ${maybeJson.message}` : ` — ${JSON.stringify(maybeJson)}`),
           );
           err.status = res.status;
+
+          // 🔴 NEW: fire global event for rate limit
+          if (err.status === 429) {
+            window.dispatchEvent(new CustomEvent("api:rate-limit"));
+          }
+
           throw err;
         } catch {
           const text = await res.text().catch(() => "");
@@ -137,6 +143,12 @@ export async function fetchJson<TResponse = unknown, TBody = unknown>(
               (text ? ` — ${text}` : ""),
           );
           err.status = res.status;
+
+          // 🔴 NEW: also fire event here
+          if (err.status === 429) {
+            window.dispatchEvent(new CustomEvent("api:rate-limit"));
+          }
+
           throw err;
         }
       }

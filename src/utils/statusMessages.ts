@@ -44,66 +44,94 @@ function normalizeError(error?: string): string {
  * English: Detailed text with symbol + HTTP context.
  */
 export function toApiMessage(symbol: string, status: number, error?: string): string {
-  const nice = normalizeError(error).toLowerCase();
+  const normalized = normalizeError(error);
+  const nice = normalized.toLowerCase();
+  const rawLow = (error ?? "").toLowerCase(); // English: preserve raw hints (e.g., "HTTP 402", "subscription")
 
   if (status === 200) return `✔️ Request successful for ${symbol}`;
   if (status === 404) return `❌ No data found for ${symbol}`;
 
-  // Upstream free-tier limit (may be wrapped in 500/502 with detail=402)
-  if (status === 402 || nice.includes("402") || nice.includes("subscription")) {
+  // English: Upstream free-tier may be wrapped in 5xx with detail=402 or subscription wording
+  if (
+    status === 402 ||
+    nice.includes("subscription") ||
+    rawLow.includes("subscription") ||
+    rawLow.includes("payment required") ||
+    rawLow.includes('"status":402') ||
+    rawLow.includes("http 402") ||
+    nice.includes("402") ||
+    rawLow.includes("402")
+  ) {
     return `⛔ Free-tier limit for ${symbol}`;
   }
 
-  // Upstream rate limit (may be wrapped in 500/502 with detail=429)
-  if (status === 429 || nice.includes("429") || nice.includes("too many requests")) {
+  // English: Upstream rate limit may be wrapped in 5xx with detail=429
+  if (
+    status === 429 ||
+    nice.includes("too many requests") ||
+    rawLow.includes("too many requests") ||
+    rawLow.includes('"status":429') ||
+    rawLow.includes("http 429") ||
+    nice.includes("429") ||
+    rawLow.includes("429")
+  ) {
     return `⏳ Rate limit reached for ${symbol}`;
   }
 
   if (status === 400) return `⚠️ Bad request for ${symbol}`;
+
+  // English: treat classic 5xx as server-side issues
   if (status === 500 || status === 502 || status === 503) {
     return error
-      ? `⚠️ Server issue for ${symbol}: ${normalizeError(error)}`
+      ? `⚠️ Server issue for ${symbol}: ${normalized}`
       : `⚠️ Server issue for ${symbol}`;
   }
 
-  const msg = normalizeError(error);
-  return msg ? `⚠️ ${msg}` : `⚠️ Request failed for ${symbol} (HTTP ${status})`;
-  return error || `⚠️ Request failed for ${symbol} (HTTP ${status})`;
+  // English: fallback with normalized text
+  return normalized ? `⚠️ ${normalized}` : `⚠️ Request failed for ${symbol} (HTTP ${status})`;
 }
 
 /**
  * Short status message for the transient error pill.
  * English: Compact text for quick user hint.
  */
-export function toErrorPillMessage(status: number, error?: string, retryAfterSec?: number): string {
+export function toErrorPillMessage(
+  status: number,
+  error?: string,
+  retryAfterSec?: number
+): string {
   const low = (error ?? "").toLowerCase();
 
-  // ✅ explicit success
+  // English: explicit success
   if (status === 200) return "OK";
 
-  // ✅ prefer HTTP status over text inference
-  if (status === 429) {
-    if (low.includes("daily limit")) return "Daily limit";
-    if (typeof retryAfterSec === "number" && retryAfterSec > 0)
-      return `Rate limit (${retryAfterSec}s)`;
-    return "Rate limit";
-  }
-
-  // Optional: only infer 429 from text if status is not a server error
+  // English: prefer upstream free-tier hint even if wrapped by 5xx
   if (
-    (status < 500 || status >= 600) &&
-    (low.includes("429") || low.includes("too many requests"))
+    status === 402 ||
+    /subscription|payment required|"status"\s*:\s*402|http\s*402/i.test(low)
   ) {
-    return "Rate limit";
-  }
-
-  if (status === 402 || low.includes("subscription") || low.includes("payment required")) {
     return "Free-tier limit";
   }
 
+  // English: prefer upstream rate-limit hint even if wrapped by 5xx
+  if (
+    status === 429 ||
+    /too many requests|"status"\s*:\s*429|http\s*429/i.test(low)
+  ) {
+    if (/daily limit/i.test(low)) return "Daily limit";
+    if (typeof retryAfterSec === "number" && retryAfterSec > 0) {
+      return `Rate limit (${retryAfterSec}s)`;
+    }
+    return "Rate limit";
+  }
+
+  // English: common client errors
   if (status === 404) return "Not found";
   if (status === 400) return "Bad request";
-  if (status === 500 || status === 502 || status === 503) return "Server error";
 
+  // English: server-side fallback (no upstream hints detected)
+  if (status >= 500 && status < 600) return "Server error";
+
+  // English: generic fallback
   return "Error";
 }

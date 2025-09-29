@@ -15,6 +15,7 @@ const cases: Array<[string, number, string?, number?]> = [
   ],
   ["GOOG", 400, "Symbol required"],
   ["ORCL", 503, "Service Unavailable"],
+  ["MBGYY_SAVE", 502, "{\"title\":\"Income ingest failed (after retry)\",\"status\":502,\"detail\":\"HTTP 429 Too Many Requests on /api/ingest/income/MBGYY?period=annual&limit=5: {\\\"title\\\":\\\"Rate limit reached\\\",\\\"detail\\\":\\\"Please retry after 00:00:11.1477972\\\",\\\"status\\\":429}\"}"],
 ];
 
 for (const [symbol, status, error, retry] of cases) {
@@ -41,14 +42,22 @@ function assertEq(actual: string, expected: string, label: string) {
   const pill = toErrorPillMessage(429, "AlphaVantageNote: Too many requests per minute", 10);
   assertEq(pill, "Rate limit (10s)", "Pill 429 with retry shows seconds");
 
-  // English: NFLX 502 should be server error (not 'Rate limit' inferred from text)
+  // English: 5xx with embedded 429 should show 'Rate limit' in the pill
   const pill2 = toErrorPillMessage(
     502,
-    '{"title":"Balance ingest failed","status":502,"detail":"HTTP 429 Too Many Requests"}',
+    '{"title":"Balance ingest failed","status":502,"detail":"HTTP 429 Too Many Requests"}'
   );
-  assertEq(pill2, "Server error", "Pill 5xx stays 'Server error'");
+  assertEq(pill2, "Rate limit", "Pill 5xx with embedded 429 shows 'Rate limit'");
+
 
   // English: AAPL 200 should be OK
   const pill3 = toErrorPillMessage(200);
   assertEq(pill3, "OK", "Pill 200 is OK");
+}
+
+// English: 502 with embedded 429 should classify as "Rate limit" via toApiMessage
+{
+  const e = "{\"title\":\"Income ingest failed (after retry)\",\"status\":502,\"detail\":\"HTTP 429 Too Many Requests on /api/ingest/income/MBGYY?period=annual&limit=5: {\\\"title\\\":\\\"Rate limit reached\\\",\\\"detail\\\":\\\"Please retry after 00:00:11.1477972\\\",\\\"status\\\":429}\"}";
+  const msg = toApiMessage("MBGYY_SAVE", 502, e);
+  assertEq(msg, "⏳ Rate limit reached for MBGYY_SAVE", "502 + embedded 429 maps to 'Rate limit'");
 }

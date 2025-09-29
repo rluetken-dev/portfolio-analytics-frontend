@@ -1,5 +1,6 @@
 # 🚀 Portfolio Analytics Frontend
 
+![CI/CD](https://img.shields.io/github/actions/workflow/status/rluetken-dev/portfolio-analytics-frontend/ci.yml?branch=main&label=CI%2FCD)
 ![React](https://img.shields.io/badge/React-19.1.1-blue)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.8.3-blue)
 ![Vite](https://img.shields.io/badge/Vite-7.1.2-purple)
@@ -72,7 +73,7 @@ npm run test:status
 ```
 
 ## 📖 Documentation
-- **Detailed guide**: [README.DETAIL.md](./README.DETAIL.md)
+- **Detailed guide**: [README.md](./docs/README.md)
 - **Backend Swagger**: http://localhost:5179/swagger
 - **Analytics endpoints**: ../backend/docs/analytics-endpoints.md
 - **Commit conventions**: https://www.conventionalcommits.org/

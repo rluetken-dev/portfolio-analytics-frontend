@@ -1271,6 +1271,9 @@ export default function AnalyticsMiniPanel({
                   setFundErr(pillMsg);
 
                   console.warn("[panel] fundamentals refresh failed:", e);
+                } finally {
+                  // English: always release busy flag so buttons re-enable
+                  setFundBusy(false);
                 }
               }}
               disabled={loading || fundBusy}

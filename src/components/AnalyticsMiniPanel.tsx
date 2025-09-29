@@ -4,14 +4,12 @@ import { getLatestCloseFromQuotes } from "../services/api/quotes";
 import { refreshQuotes } from "../services/api/quotes";
 import { fetchFundamentalsSnapshot, type SnapshotResult } from "../services/api/fundamentals";
 import { refreshFundamentals } from "../services/api/fundamentals";
-import { getCurrentPrice, type CurrentQuote } from "../services/api/quotes";
 import { toApiMessage } from "../utils/statusMessages";
 import { toErrorPillMessage } from "../utils/statusMessages";
 import { fetchLatestDateISO } from "../utils/dateUtils";
 
-// English: symbols not available on free tier (UI-only messaging override)
-const PREMIUM_ONLY = new Set<string>(["MBGYY"]);
-
+// English: live price (non-persistent) fetcher
+import { getCurrentPrice, type CurrentQuote } from "../services/api/quotes";
 
 /**
  * Very small self-contained panel to show two metrics for a symbol:
@@ -1263,22 +1261,14 @@ export default function AnalyticsMiniPanel({
                   // ✅ reload so analytics can pick up newly persisted data
                   await load();
                 } catch (e) {
+                  // English: normalize error and map once via shared helpers
                   const errMsg = e instanceof Error ? e.message : String(e);
 
-                  // English: UI-only override for premium-only symbols (clear cause for users)
-                  const isPremiumOnly = PREMIUM_ONLY.has(currentSym);
-                  if (isPremiumOnly) {
-                    // Show explicit free-tier messaging regardless of upstream wrapping (429/5xx)
-                    setFundSaveStatus(`⛔ Free-tier limit for ${currentSym}`);
-                    setFundErr("Free-tier limit");
-                  } else {
-                    // Default classification (uses embedded 4xx hints if present)
-                    const statusMsg = toApiMessage(currentSym, 500, errMsg);
-                    setFundSaveStatus(statusMsg);
+                  const statusMsg = toApiMessage(currentSym, 500, errMsg);
+                  setFundSaveStatus(statusMsg);
 
-                    const pillMsg = toErrorPillMessage(500, errMsg);
-                    setFundErr(pillMsg);
-                  }
+                  const pillMsg = toErrorPillMessage(500, errMsg);
+                  setFundErr(pillMsg);
 
                   console.warn("[panel] fundamentals refresh failed:", e);
                 }

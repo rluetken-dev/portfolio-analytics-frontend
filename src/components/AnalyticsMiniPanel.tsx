@@ -1261,19 +1261,24 @@ export default function AnalyticsMiniPanel({
                   // ✅ reload so analytics can pick up newly persisted data
                   await load();
                 } catch (e) {
-                  // safely extract error message
                   const errMsg = e instanceof Error ? e.message : String(e);
 
-                  // ❌ use unified messages for error cases
-                  const statusMsg = toApiMessage(currentSym, 500, errMsg);
-                  setFundSaveStatus(statusMsg);
+                  // English: UI-only override for premium-only symbols (clear cause for users)
+                  const isPremiumOnly = currentSym === "MBGYY";
+                  if (isPremiumOnly) {
+                    // Show explicit free-tier messaging regardless of upstream wrapping (429/5xx)
+                    setFundSaveStatus(`⛔ Free-tier limit for ${currentSym}`);
+                    setFundErr("Free-tier limit");
+                  } else {
+                    // Default classification (uses embedded 4xx hints if present)
+                    const statusMsg = toApiMessage(currentSym, 500, errMsg);
+                    setFundSaveStatus(statusMsg);
 
-                  const pillMsg = toErrorPillMessage(500, errMsg);
-                  setFundErr(pillMsg);
+                    const pillMsg = toErrorPillMessage(500, errMsg);
+                    setFundErr(pillMsg);
+                  }
 
                   console.warn("[panel] fundamentals refresh failed:", e);
-                } finally {
-                  setFundBusy(false);
                 }
               }}
               disabled={loading || fundBusy}

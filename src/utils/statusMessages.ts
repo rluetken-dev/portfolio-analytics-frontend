@@ -60,12 +60,14 @@ export function toApiMessage(symbol: string, status: number, error?: string): st
   }
 
   if (status === 400) return `⚠️ Bad request for ${symbol}`;
-  if (status === 500 || status === 502) {
+  if (status === 500 || status === 502 || status === 503) {
     return error
       ? `⚠️ Server issue for ${symbol}: ${normalizeError(error)}`
       : `⚠️ Server issue for ${symbol}`;
   }
 
+  const msg = normalizeError(error);
+  return msg ? `⚠️ ${msg}` : `⚠️ Request failed for ${symbol} (HTTP ${status})`;
   return error || `⚠️ Request failed for ${symbol} (HTTP ${status})`;
 }
 
@@ -76,10 +78,23 @@ export function toApiMessage(symbol: string, status: number, error?: string): st
 export function toErrorPillMessage(status: number, error?: string, retryAfterSec?: number): string {
   const low = (error ?? "").toLowerCase();
 
-  if (status === 429 || low.includes("429") || low.includes("too many requests")) {
+  // ✅ explicit success
+  if (status === 200) return "OK";
+
+  // ✅ prefer HTTP status over text inference
+  if (status === 429) {
     if (low.includes("daily limit")) return "Daily limit";
-    if (low.includes("per-minute") || low.includes("minute")) return "Rate limit";
-    return retryAfterSec ? `Rate limit (${retryAfterSec}s)` : "Rate limit";
+    if (typeof retryAfterSec === "number" && retryAfterSec > 0)
+      return `Rate limit (${retryAfterSec}s)`;
+    return "Rate limit";
+  }
+
+  // Optional: only infer 429 from text if status is not a server error
+  if (
+    (status < 500 || status >= 600) &&
+    (low.includes("429") || low.includes("too many requests"))
+  ) {
+    return "Rate limit";
   }
 
   if (status === 402 || low.includes("subscription") || low.includes("payment required")) {
@@ -88,7 +103,7 @@ export function toErrorPillMessage(status: number, error?: string, retryAfterSec
 
   if (status === 404) return "Not found";
   if (status === 400) return "Bad request";
-  if (status === 500 || status === 502) return "Server error";
+  if (status === 500 || status === 502 || status === 503) return "Server error";
 
   return "Error";
 }

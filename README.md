@@ -1,6 +1,6 @@
 # 🚀 Portfolio Analytics Frontend
 
-![CI/CD](https://img.shields.io/github/actions/workflow/status/rluetken-dev/portfolio-analytics-frontend/ci.yml?branch=main&label=CI%2FCD)
+[![CI/CD](https://github.com/rluetken-dev/portfolio-analytics-frontend/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/rluetken-dev/portfolio-analytics-frontend/actions/workflows/ci.yml)
 ![React](https://img.shields.io/badge/React-19.1.1-blue)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.8.3-blue)
 ![Vite](https://img.shields.io/badge/Vite-7.1.2-purple)

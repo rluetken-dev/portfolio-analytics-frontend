@@ -1,94 +1,159 @@
-# Portfolio Analytics Frontend — Detailed Docs
+# 🚀 Portfolio Analytics Frontend — Detailed Guide
 
-> This document is the **developer-facing documentation**.  
-> The root `README.md` stays short as a GitHub "business card".
+This document describes setup, configuration, architecture, components, testing and operations for the **frontend**.  
+For a quick overview and badges, see the root [README.md](./README.md).
 
-## 1) Overview
+---
 
-- **Purpose:** Frontend for the Portfolio Analytics project.
-- **Scope:** UI to browse, filter, and analyze fundamentals and computed metrics.
-- **Backend:** .NET 8 + EF Core + SQLite (separate repo/service).
+## Overview
+- **Purpose:** Modern React/Vite app for exploring companies, fetching & visualizing analytics, and managing watchlists.
+- **UX:** Clear, compact **status messages**; graceful handling of free‑tier and rate‑limit constraints.
+- **Integration:** Connects to the .NET backend at `VITE_API_URL` (default `http://localhost:5179`).
 
-## 2) Goals & Non-Goals
+## Key Features
+- **🔍 Smart Company Search** — local‑first search, offline popular bundle, external fallback.
+- **📊 Real‑time Analytics** — inline KPIs, simple sparkline, charts.
+- **🏢 Company Management** — add/remove/track companies with quick actions (Mega‑Cap, Tech Giants, Dow 30, …).
+- **🔔 User Feedback** — transient error pills + persistent status lines.
+- **📱 Responsive** — desktop & mobile friendly.
+- **🧭 Routing** — multi‑page app with React Router.
 
-- **Goals:** Fast, clean, type-safe UI; simple state management; clear API layer.
-- **Non-Goals:** No heavy SSR or CMS; keep dependencies minimal initially.
+## Tech Stack
+- **React 19.1.1**
+- **TypeScript 5.8.3**
+- **Vite 7.1.2**
+- **React Router 7.9.1**
+- **Recharts 3.2.0** (KPI charts)
+- **Lightweight Charts 5.0.8** (candles)
+- Node ≥ 20
 
-## 3) Architecture (High-Level)
-
-- **Frontend:** React + TypeScript + Vite
-- **Layers:**
-  - `components/` – UI building blocks
-  - `features/` – domain-oriented screens/logic
-  - `services/api/` – HTTP clients & DTOs
-  - `lib/` – utilities, helpers
-  - `styles/` – global CSS (or Tailwind if added)
-- **State:** Start simple with React state; add Zustand/Redux only if needed.
-
-## 4) Tech Stack
-
-- React 18, TypeScript, Vite
-- Testing (TBD): Vitest + React Testing Library
-- Lint/Format (TBD): ESLint + Prettier
-- UI (TBD): Minimal CSS; can add Tailwind or shadcn/ui later
-
-## 5) Environments
-
-- **Dev:** `npm run dev`
-- **Build:** `npm run build`
-- **Preview:** `npm run preview`
-- **Env Vars (TBD):** e.g. `VITE_API_BASE_URL`
-
-## 6) Scripts (npm)
-
-- `dev` – start Vite dev server
-- `build` – production build
-- `preview` – preview built app locally
-- (TBD) `lint`, `format`, `test`
-
-## 7) Project Structure (Proposed)
-
+## Project Structure
 ```
 src/
-  app/                # app-level setup (providers, routes)
-  components/         # reusable UI components
-  features/           # domain-specific modules/pages
-  services/
-    api/              # API clients, DTOs, request helpers
-  lib/                # utilities
-  assets/             # static assets
-  styles/             # global styles (if used)
+├── pages/
+│   ├── Companies.tsx        # company list with search & filters
+│   ├── Company.tsx          # detailed company view
+│   ├── Home.tsx             # landing
+│   ├── Health.tsx           # backend status/health
+│   └── About.tsx            # about
+│
+├── components/
+│   ├── NavBar.tsx
+│   ├── Notification.tsx
+│   ├── ConfirmDialog.tsx
+│   ├── CompanyDiscovery.tsx
+│   ├── AnalyticsMiniPanel.tsx
+│   └── company/
+│       ├── CompanyHeader.tsx
+│       ├── CompanyKpis.tsx
+│       ├── CompanyPriceChart.tsx
+│       ├── CompanyCandleChart.tsx
+│       └── analytics/
+│
+├── services/api/
+│   ├── client.ts            # HTTP client
+│   ├── analytics.ts         # analytics endpoints
+│   ├── fundamentals.ts      # fundamentals endpoints
+│   └── quotes.ts            # price endpoints
+│
+├── utils/
+│   ├── statusMessages.ts
+│   ├── statusMessages.test.ts
+│   ├── dateUtils.ts
+│   └── …
+├── types/
+└── context/
 ```
 
-## 8) API Integration
+## Components (highlights)
+### CompanyDiscovery
+- Three discovery paths: **quick‑add buttons**, **search over offline bundle**, **external fallback**.
+### Notification System
+- Auto‑dismiss success/error, consistent styling, click to dismiss.
+### ConfirmDialog
+- Replaces `confirm()` with themed modal; variants: danger/warning/info; backdrop‑to‑cancel.
+### AnalyticsMiniPanel
+- Inline analytics: KPIs, sparkline, **Get/Save fundamentals**, **Get live price**.
 
-- **Base URL:** `VITE_API_BASE_URL` (to be set in `.env`)
-- **Clients:** `services/api/*`
-- **Error Handling:** Centralized helpers; show user-friendly messages
+## Environment & Config
+Create `.env.development`:
+```env
+VITE_API_URL=http://localhost:5179
+VITE_APP_TITLE="Portfolio Analytics"
+```
+Ports:
+- **Frontend dev**: `http://localhost:5173`
+- **Backend**: `http://localhost:5179` (Swagger at `/swagger`)
 
-## 9) Coding Standards
+## Scripts
+```bash
+npm run dev          # start Vite dev server
+npm run build        # production build
+npm run preview      # preview production build
+npm run lint         # ESLint check
+npm run lint:fix     # ESLint auto-fix
+npm run format       # Prettier format
+npm run test:status  # status message smoke tests
+```
 
-- **TypeScript first:** explicit types where helpful
-- **Components:** small, focused; prefer composition
-- **Commits:** Conventional Commits
-- **PRs:** small, descriptive; include screenshots for UI changes
+## Status Messages (semantics)
+The UI maps responses to **clear categories**:
+- `200` → ✔️ Request successful
+- `404` → ❌ No data found
+- `400` → ⚠️ Bad request
+- `402` (or text markers) → ⛔ Free‑tier limit
+- `429` (or text markers) → ⏳ Rate limit (e.g., `Daily limit`, `Rate limit (10s)`)
+- `5xx` → ⚠️ Server error
+> Embedded `402/429` inside `5xx` are still recognized by text hints.
 
-## 10) Git & CI (TBD)
+**Tests**
+```bash
+npm run test:status
+# File: src/utils/statusMessages.test.ts
+```
+The test simulates cases (200/400/404/402/429/5xx incl. embedded hints) and checks the pill + status line.
 
-- **Branches:** `main` (protected), feature branches per task
-- **CI:** Node setup, install, lint, test, build
-- **Quality Gates:** lint/test must pass before merge
+## API Integration
+- HTTP layer in `src/services/api/*` with minimal client helpers.
+- Endpoints:
+  - **Analytics**: `/api/analytics/<metric>?symbol=XYZ`
+  - **Fundamentals**: `/api/data/*` and `/api/ingest/*` via backend actions
+  - **Quotes**: `/api/quotes/latest?symbol=XYZ&take=1`, `/api/quotes/timeseries?...`
+- Strategy: **local‑first** in backend + client‑side debouncing to reduce calls (free tier).
 
-## 11) Roadmap (Initial)
+## State Management
+- Local component state (hooks), route state via React Router.
+- Persistence via `localStorage` for small preferences (e.g., pinned symbols).
 
-- [ ] Setup ESLint + Prettier + basic rules
-- [ ] Add simple routing (React Router)
-- [ ] Add API base client + health check view
-- [ ] Create first feature page (e.g., Companies list)
-- [ ] Connect to backend endpoints
-- [ ] Add basic tests (Vitest + RTL)
-- [ ] CI workflow (GitHub Actions)
+## Performance
+- Route‑level code splitting, memoization, debounced search.
+- Lightweight sparkline (pure SVG), minimal re‑renders.
 
-## 12) License
+## Browser Support
+- Chrome/Edge/Firefox/Safari (latest), and modern mobile browsers.
 
-MIT
+## Contributing
+- Conventional Commits (`feat:`, `fix:`, `docs:`, …)
+- Feature branches → PRs
+
+## Known Issues
+- Search & ingestion depend on provider free tiers (may hit **rate/free‑tier limits**).
+- Some ETFs/firms may have incomplete fundamentals.
+- Candles require sufficient history.
+
+## Roadmap
+- Dark mode
+- Export (CSV/Excel)
+- Portfolio tracking & watchlists
+- Technical indicators
+- Real‑time price updates (WebSocket)
+- Mobile app (React Native)
+
+## Docs & Links
+- **Backend Swagger:** http://localhost:5179/swagger
+- **Analytics endpoints (backend doc):** ../backend/docs/analytics-endpoints.md
+- **Commit conventions:** https://www.conventionalcommits.org/
+
+## License & Author
+- MIT — see `LICENSE`
+- Author: rluetken (GitHub: @rluetken-dev)

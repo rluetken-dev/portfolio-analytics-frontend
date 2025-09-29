@@ -16,6 +16,7 @@ const cases: Array<[string, number, string?, number?]> = [
   ["GOOG", 400, "Symbol required"],
   ["ORCL", 503, "Service Unavailable"],
   ["MBGYY_SAVE", 502, "{\"title\":\"Income ingest failed (after retry)\",\"status\":502,\"detail\":\"HTTP 429 Too Many Requests on /api/ingest/income/MBGYY?period=annual&limit=5: {\\\"title\\\":\\\"Rate limit reached\\\",\\\"detail\\\":\\\"Please retry after 00:00:11.1477972\\\",\\\"status\\\":429}\"}"],
+  ["MBG_FT_WRAP", 502, "{\"title\":\"Balance ingest failed\",\"status\":502,\"detail\":\"HTTP 402 Payment Required: Premium Query Parameter: not available under your current subscription\"}"],
 ];
 
 for (const [symbol, status, error, retry] of cases) {
@@ -26,6 +27,7 @@ for (const [symbol, status, error, retry] of cases) {
   console.log("Status line:", statusMsg);
   console.log("Error pill :", pillMsg);
 }
+console.log("");
 
 // --- Tiny asserts (no framework) ---
 // English: super-light assertion helper for console-based checks
@@ -61,3 +63,13 @@ function assertEq(actual: string, expected: string, label: string) {
   const msg = toApiMessage("MBGYY_SAVE", 502, e);
   assertEq(msg, "⏳ Rate limit reached for MBGYY_SAVE", "502 + embedded 429 maps to 'Rate limit'");
 }
+
+{
+  const e402 = "{\"title\":\"Balance ingest failed\",\"status\":502,\"detail\":\"HTTP 402 Payment Required: Premium Query Parameter: not available under your current subscription\"}";
+  const msg = toApiMessage("MBG_FT_WRAP", 502, e402);
+  assertEq(msg, "⛔ Free-tier limit for MBG_FT_WRAP", "502 + embedded 402 maps to 'Free-tier limit'");
+
+  const pill = toErrorPillMessage(502, e402);
+  assertEq(pill, "Free-tier limit", "Pill 5xx with embedded 402 shows 'Free-tier limit'");
+}
+

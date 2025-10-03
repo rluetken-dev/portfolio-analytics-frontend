@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useAuth } from "../hooks/useAuth";
 import { useNavigate } from "react-router-dom";
 import { Spinner } from "../components/Spinner";
+import { Link } from "react-router-dom";
 
 /**
  * Centered login page with username & password form.
@@ -27,8 +28,21 @@ export default function Login() {
     try {
       await login(username, password);
       navigate("/companies");
-    } catch {
-      setError("Invalid username or password");
+    } catch (err: unknown) {
+      console.error("Login error:", err);
+
+      if (err instanceof Error && "status" in err) {
+        const status = (err as { status?: number }).status;
+        if (status === 401) {
+          setError("Invalid username or password");
+        } else if (status && status >= 500) {
+          setError("Server error, please try again later");
+        } else {
+          setError("Login failed, please try again");
+        }
+      } else {
+        setError("Unexpected error occurred");
+      }
     } finally {
       setLoading(false);
     }
@@ -117,8 +131,8 @@ export default function Login() {
               marginTop: "0.75rem",
               padding: "0.5rem 0.75rem",
               borderRadius: "6px",
-              backgroundColor: "#fee2e2", // light red background
-              color: "#b91c1c", // dark red text
+              backgroundColor: "#fee2e2",
+              color: "#b91c1c",
               fontSize: "0.875rem",
               fontWeight: 500,
             }}
@@ -126,6 +140,21 @@ export default function Login() {
             ⚠️ {error}
           </div>
         )}
+
+        {/* 🔹 NEU: Link zur Register-Seite */}
+        <p
+          style={{
+            marginTop: "1rem",
+            textAlign: "center",
+            fontSize: "0.875rem",
+            color: "#374151", // neutral gray
+          }}
+        >
+          Don’t have an account?{" "}
+          <Link to="/register" style={{ color: "#2563eb", fontWeight: 500 }}>
+            Register here
+          </Link>
+        </p>
       </div>
     </div>
   );

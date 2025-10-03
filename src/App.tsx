@@ -1,3 +1,4 @@
+// src/App.tsx
 import { Routes, Route } from "react-router-dom";
 
 // Import pages
@@ -8,13 +9,13 @@ import NotFound from "./pages/NotFound";
 import Companies from "./pages/Companies";
 import CompanyPage from "./pages/Company";
 import Login from "./pages/Login";
+import Register from "./pages/Register"; // ✅ NEU
 
 // Import components
 import NavBar from "./components/NavBar";
 
 // Import AuthProvider
 import { AuthProvider } from "./context/AuthProvider";
-
 import { ProtectedRoute } from "./components/ProtectedRoute";
 
 function App() {
@@ -22,6 +23,7 @@ function App() {
     <AuthProvider>
       <div style={{ padding: "2rem", fontFamily: "Arial, sans-serif" }}>
         <NavBar />
+
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/about" element={<About />} />
@@ -43,6 +45,7 @@ function App() {
             }
           />
           <Route path="/login" element={<Login />} />
+          <Route path="/register" element={<Register />} /> {/* ✅ NEU */}
           <Route path="*" element={<NotFound />} />
         </Routes>
       </div>

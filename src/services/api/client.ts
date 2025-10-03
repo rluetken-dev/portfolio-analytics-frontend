@@ -124,8 +124,8 @@ export async function fetchJson<TResponse = unknown, TBody = unknown>(
       }
 
       if (!res.ok) {
-        // 🔄 Auto-refresh if 401 Unauthorized
-        if (res.status === 401) {
+        // 🔄 Auto-refresh if 401 Unauthorized (but NOT on login)
+        if (res.status === 401 && !path.includes("/api/User/login")) {
           const refreshResponse = await fetch(buildUrl("/api/User/refresh"), {
             method: "POST",
             credentials: "include", // send refreshToken cookie
@@ -146,40 +146,31 @@ export async function fetchJson<TResponse = unknown, TBody = unknown>(
             });
           } else {
             clearAccessToken();
-            throw new Error("Unauthorized and refresh failed");
+            const err: HttpError = new Error("Unauthorized and refresh failed");
+            err.status = 401;
+            throw err;
           }
         }
 
+        let errorMessage = `HTTP ${res.status} ${res.statusText}`;
         try {
-          type ErrorPayload = { message?: string; [k: string]: unknown };
-          const maybeJson = (await res.json()) as ErrorPayload;
-          const err: HttpError = new Error(
-            `HTTP ${res.status} ${res.statusText} for ${method} ${path}` +
-              (maybeJson.message ? ` — ${maybeJson.message}` : ` — ${JSON.stringify(maybeJson)}`),
-          );
-          err.status = res.status;
-
-          // 🔴 NEW: fire global event for rate limit
-          if (err.status === 429) {
-            window.dispatchEvent(new CustomEvent("api:rate-limit"));
+          const contentType = res.headers.get("content-type");
+          if (contentType && contentType.includes("application/json")) {
+            const data = (await res.json()) as { message?: string };
+            if (data.message) {
+              errorMessage = data.message; // ✅ take backend message if available
+            }
+          } else {
+            const text = await res.text().catch(() => "");
+            if (text) errorMessage = text;
           }
-
-          throw err;
         } catch {
-          const text = await res.text().catch(() => "");
-          const err: HttpError = new Error(
-            `HTTP ${res.status} ${res.statusText} for ${method} ${path}` +
-              (text ? ` — ${text}` : ""),
-          );
-          err.status = res.status;
-
-          // 🔴 NEW: also fire event here
-          if (err.status === 429) {
-            window.dispatchEvent(new CustomEvent("api:rate-limit"));
-          }
-
-          throw err;
+          // ignore JSON/text parsing errors and keep default errorMessage
         }
+
+        const err: HttpError = new Error(errorMessage);
+        err.status = res.status;
+        throw err;
       }
 
       const text = await res.text();

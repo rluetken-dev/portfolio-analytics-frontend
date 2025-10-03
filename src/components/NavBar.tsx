@@ -1,5 +1,6 @@
 // src/components/NavBar.tsx
 import { Link, useLocation, useMatch } from "react-router-dom";
+import { AuthBadge } from "./AuthBadge";
 
 /**
  * Simple top navigation bar.
@@ -24,7 +25,7 @@ export default function NavBar() {
     <nav
       style={{
         marginBottom: "1rem",
-        display: "flex", // lay out left links and right chip in one row
+        display: "flex",
         alignItems: "center",
         gap: 8,
       }}
@@ -48,22 +49,21 @@ export default function NavBar() {
         </Link>
       </div>
 
-      {/* Spacer pushes the chip to the far right */}
+      {/* Spacer pushes the right content to the far end */}
       <div style={{ flex: 1 }} />
 
-      {/* Right: contextual chip only on /company/:symbol */}
+      {/* Right: show current company chip (if any) */}
       {sym && (
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <Link
             to={`/company/${sym}`}
             title={`Open details for ${sym}`}
-            // compact green chip to indicate current company context
             style={{
               padding: "2px 8px",
               borderRadius: 999,
               border: "1px solid #22c55e",
               background: "rgba(34, 197, 94, 0.12)",
-              color: "#dcfce7",
+              color: "#22c55e",
               textDecoration: "none",
               fontSize: 12,
               lineHeight: 1.2,
@@ -78,6 +78,9 @@ export default function NavBar() {
           </Link>
         </div>
       )}
+
+      {/* 🔹 Always show AuthBadge at the far right */}
+      <AuthBadge />
     </nav>
   );
 }

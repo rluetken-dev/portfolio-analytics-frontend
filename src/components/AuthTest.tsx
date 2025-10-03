@@ -1,51 +1,33 @@
 import { useState } from "react";
-import { login, logout, fetchMe } from "../services/api/auth";
-import type { User, LoginResponse } from "../types/auth";
+import { useAuth } from "../hooks/useAuth"; // ✅ statt direkte API-Calls
 
 export default function AuthTest() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [userInfo, setUserInfo] = useState<User | null>(null);
-  const [error, setError] = useState<string | null>(null);
+
+  const { user, isAuthenticated, login, logout } = useAuth();
 
   async function handleLogin() {
     try {
-      const res: LoginResponse = await login({ username, password });
-      console.log("Login success:", res);
-      setError(null);
+      await login(username, password); // ✅ Context-Login ruft Provider
+      console.log("Login via AuthProvider success");
     } catch (err: unknown) {
       console.error("Login failed:", err);
-      setError(err instanceof Error ? err.message : "Unknown error");
-    }
-  }
-
-  async function handleFetchMe() {
-    try {
-      const me: User = await fetchMe();
-      console.log("User info:", me);
-      setUserInfo(me);
-      setError(null);
-    } catch (err: unknown) {
-      console.error("FetchMe failed:", err);
-      setError(err instanceof Error ? err.message : "Unknown error");
     }
   }
 
   async function handleLogout() {
     try {
-      await logout();
-      setUserInfo(null);
-      setError(null);
-      console.log("Logged out");
+      await logout(); // ✅ Context-Logout ruft Provider
+      console.log("Logged out via AuthProvider");
     } catch (err: unknown) {
       console.error("Logout failed:", err);
-      setError(err instanceof Error ? err.message : "Unknown error");
     }
   }
 
   return (
     <div style={{ padding: "1rem", border: "1px solid #ccc", marginTop: "1rem" }}>
-      <h2>🔐 Auth Test</h2>
+      <h2>🔐 Auth Test (via Context)</h2>
 
       <div>
         <input
@@ -66,11 +48,15 @@ export default function AuthTest() {
       </div>
 
       <button onClick={handleLogin}>Login</button>
-      <button onClick={handleFetchMe}>Fetch Me</button>
       <button onClick={handleLogout}>Logout</button>
 
-      {error && <p style={{ color: "red" }}>⚠️ {error}</p>}
-      {userInfo && <pre style={{ textAlign: "left" }}>{JSON.stringify(userInfo, null, 2)}</pre>}
+      <div style={{ marginTop: "1rem" }}>
+        {isAuthenticated ? (
+          <p style={{ color: "green" }}>✅ Logged in as {user?.username}</p>
+        ) : (
+          <p style={{ color: "red" }}>❌ Not logged in</p>
+        )}
+      </div>
     </div>
   );
 }

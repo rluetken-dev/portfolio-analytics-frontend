@@ -9,19 +9,22 @@ import { clearAccessToken } from "../utils/token";
 
 // AuthProvider: wraps the app and provides auth state + actions
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
+    const [user, setUser] = useState<User | null>(null);
 
-  async function login(username: string, password: string) {
+    async function login(username: string, password: string) {
     try {
-      const response = await apiLogin({ username, password });
-      setAccessToken(response.accessToken); // store token in memory
-      setUser(response.user); // update user state
-      console.log("Login successful:", response.user);
+        const response = await apiLogin({ username, password });
+        console.log("AuthProvider.login() response:", response); // 🔹 Debug
+        
+        setAccessToken(response.accessToken);  
+        setUser(response.user); // 🔹 sollte Badge updaten
+        console.log("AuthProvider state updated:", response.user); // 🔹 Debug
     } catch (err) {
-      console.error("Login failed:", err);
-      throw err; // rethrow so UI can show error
+        console.error("Login failed:", err);
+        throw err;
     }
-  }
+    }
+
 
   async function logout() {
     try {

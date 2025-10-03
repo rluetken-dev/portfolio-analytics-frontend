@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useAuth } from "../hooks/useAuth";
 import { useNavigate } from "react-router-dom";
-import { Spinner } from "../components/Spinner"; 
+import { Spinner } from "../components/Spinner";
 
 /**
  * Centered login page with username & password form.
@@ -17,14 +17,20 @@ export default function Login() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setLoading(true); // 🔹 start loading
+
+    if (!username || !password) {
+      setError("Please enter username and password");
+      return;
+    }
+
+    setLoading(true);
     try {
       await login(username, password);
-      navigate("/companies"); // redirect after login
+      navigate("/companies");
     } catch {
       setError("Invalid username or password");
     } finally {
-      setLoading(false); // 🔹 always stop loading
+      setLoading(false);
     }
   }
 
@@ -69,7 +75,6 @@ export default function Login() {
             placeholder="Username"
             value={username}
             onChange={(e) => setUsername(e.target.value)}
-            required
             style={{ padding: "0.5rem", borderRadius: "4px", border: "1px solid #ccc" }}
           />
           <input
@@ -77,42 +82,54 @@ export default function Login() {
             placeholder="Password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            required
             style={{ padding: "0.5rem", borderRadius: "4px", border: "1px solid #ccc" }}
           />
           <button
-  type="submit"
-  disabled={loading}
-  style={{
-    padding: "0.5rem",
-    borderRadius: "4px",
-    border: "none",
-    backgroundColor: loading ? "#93c5fd" : "#2563eb",
-    color: "white",
-    fontWeight: 500,
-    cursor: loading ? "not-allowed" : "pointer",
-    transition: "background 0.2s ease",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: "0.5rem",
-  }}
->
-  {loading ? (
-    <>
-      <Spinner /> Logging in…
-    </>
-  ) : (
-    "Login"
-  )}
-</button>
+            type="submit"
+            disabled={loading}
+            style={{
+              padding: "0.5rem",
+              borderRadius: "4px",
+              border: "none",
+              backgroundColor: loading ? "#93c5fd" : "#2563eb",
+              color: "white",
+              fontWeight: 500,
+              cursor: loading ? "not-allowed" : "pointer",
+              transition: "background 0.2s ease",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: "0.5rem",
+            }}
+          >
+            {loading ? (
+              <>
+                <Spinner /> Logging in…
+              </>
+            ) : (
+              "Login"
+            )}
+          </button>
         </form>
-        {error && <p style={{ color: "red", marginTop: "0.5rem" }}>{error}</p>}
+        {error && (
+          <div
+            style={{
+              marginTop: "0.75rem",
+              padding: "0.5rem 0.75rem",
+              borderRadius: "6px",
+              backgroundColor: "#fee2e2", // light red background
+              color: "#b91c1c", // dark red text
+              fontSize: "0.875rem",
+              fontWeight: 500,
+            }}
+          >
+            ⚠️ {error}
+          </div>
+        )}
       </div>
     </div>
   );
 }
-
 
 // Global style injection for spin animation
 const style = document.createElement("style");

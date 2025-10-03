@@ -1,6 +1,7 @@
 import { fetchJson } from "./client";
 import type { LoginRequest, LoginResponse, User } from "../../types/auth";
 import { setAccessToken } from "../../utils/token";
+import { clearAccessToken } from "../../utils/token";
 
 // Login
 export async function login(data: LoginRequest): Promise<LoginResponse> {
@@ -18,10 +19,16 @@ export async function login(data: LoginRequest): Promise<LoginResponse> {
 
 // Logout
 export async function logout(): Promise<void> {
-  await fetchJson<void>({
-    method: "POST",
-    path: "/api/User/logout",
-  });
+  try {
+    await fetchJson({
+      method: "POST",
+      path: "/api/User/logout",
+    });
+  } catch (err) {
+    console.warn("Logout request failed:", err);
+  } finally {
+    clearAccessToken(); // immer AccessToken löschen
+  }
 }
 
 // Aktueller User

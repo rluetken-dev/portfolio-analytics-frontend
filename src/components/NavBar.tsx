@@ -44,9 +44,6 @@ export default function NavBar() {
         <Link to="/health" style={linkStyle("/health")}>
           Health
         </Link>
-        <Link to="/auth-test" style={{ color: "red" }}>
-          Auth Test
-        </Link>
       </div>
 
       {/* Spacer pushes the right content to the far end */}

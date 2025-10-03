@@ -2,11 +2,8 @@ import { useState, useEffect } from "react";
 import type { ReactNode } from "react";
 import type { User } from "../types/auth";
 import { AuthContext } from "./auth-context";
-import { login as apiLogin } from "../services/api/auth";
-import { setAccessToken } from "../utils/token";
-import { logout as apiLogout } from "../services/api/auth";
-import { clearAccessToken } from "../utils/token";
-import { fetchMe } from "../services/api/auth";
+import { login as apiLogin, fetchMe, refresh, logout as apiLogout } from "../services/api/auth";
+import { setAccessToken, clearAccessToken } from "../utils/token";
 
 // AuthProvider: wraps the app and provides auth state + actions
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -15,12 +12,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     async function initAuth() {
       try {
+        // First try to fetch user with current access token
         const me = await fetchMe();
         setUser(me);
         console.log("Restored session for:", me.username);
       } catch {
-        console.log("No active session");
-        setUser(null);
+        console.log("Access token invalid, trying refresh...");
+
+        try {
+          const newTokens = await refresh();
+          setAccessToken(newTokens.accessToken);
+
+          const me = await fetchMe();
+          setUser(me);
+          console.log("Session restored via refresh for:", me.username);
+        } catch {
+          console.log("No active session available");
+          setUser(null);
+        }
       }
     }
 

@@ -7,7 +7,7 @@ import Health from "./pages/Health";
 import NotFound from "./pages/NotFound";
 import Companies from "./pages/Companies";
 import CompanyPage from "./pages/Company";
-import AuthTest from "./components/AuthTest";
+import Login from "./pages/Login";
 
 // Import components
 import NavBar from "./components/NavBar";
@@ -28,7 +28,8 @@ function App() {
           <Route path="*" element={<NotFound />} />
           <Route path="/companies" element={<Companies />} />
           <Route path="/company/:symbol" element={<CompanyPage />} />
-          <Route path="/auth-test" element={<AuthTest />} />
+          <Route path="/login" element={<Login />} /> {/* 🔹 NEU */}
+          <Route path="*" element={<NotFound />} />
         </Routes>
       </div>
     </AuthProvider>

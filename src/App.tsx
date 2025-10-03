@@ -26,16 +26,22 @@ function App() {
           <Route path="/" element={<Home />} />
           <Route path="/about" element={<About />} />
           <Route path="/health" element={<Health />} />
-          <Route path="/companies" element={
-            <ProtectedRoute>
-              <Companies />
-            </ProtectedRoute>
-          } />
-          <Route path="/company/:symbol" element={
-            <ProtectedRoute>
-              <CompanyPage />
-            </ProtectedRoute>
-          } />
+          <Route
+            path="/companies"
+            element={
+              <ProtectedRoute>
+                <Companies />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/company/:symbol"
+            element={
+              <ProtectedRoute>
+                <CompanyPage />
+              </ProtectedRoute>
+            }
+          />
           <Route path="/login" element={<Login />} />
           <Route path="*" element={<NotFound />} />
         </Routes>

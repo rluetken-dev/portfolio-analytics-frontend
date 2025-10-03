@@ -69,10 +69,6 @@ export default function NavBar() {
           >
             Company: {sym}
           </Link>
-
-          <Link to="/companies" style={linkStyle("/companies")} title="Back to list">
-            ← Back
-          </Link>
         </div>
       )}
 

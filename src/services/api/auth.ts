@@ -1,7 +1,6 @@
 import { fetchJson } from "./client";
 import type { LoginRequest, LoginResponse, User } from "../../types/auth";
-import { setAccessToken } from "../../utils/token";
-import { clearAccessToken } from "../../utils/token";
+import { setAccessToken, clearAccessToken } from "../../utils/token";
 
 // Login
 export async function login(data: LoginRequest): Promise<LoginResponse> {
@@ -31,10 +30,22 @@ export async function logout(): Promise<void> {
   }
 }
 
-// Aktueller User
+// Fetch me
 export async function fetchMe(): Promise<User> {
   return fetchJson<User>({
     method: "GET",
     path: "/api/User/me",
+  });
+}
+
+// Refresh
+export async function refresh(): Promise<{ accessToken: string }> {
+  return await fetchJson<{ accessToken: string }>({
+    method: "POST",
+    path: "/api/User/refresh",
+    // 🔹 wichtig: Cookie mit dem RefreshToken mitschicken
+    headers: {
+      "Content-Type": "application/json",
+    },
   });
 }

@@ -1,5 +1,3 @@
-// src/App.tsx
-
 import { Routes, Route } from "react-router-dom";
 
 // Import pages
@@ -14,30 +12,26 @@ import AuthTest from "./components/AuthTest";
 // Import components
 import NavBar from "./components/NavBar";
 
-/**
- * Main App component.
- * Wraps navigation and route definitions.
- */
+// Import AuthProvider
+import { AuthProvider } from "./context/AuthProvider";
+
 function App() {
   return (
-    <div style={{ padding: "2rem", fontFamily: "Arial, sans-serif" }}>
-      {/* Top navigation (separate component) */}
-      <NavBar />
+    <AuthProvider>
+      <div style={{ padding: "2rem", fontFamily: "Arial, sans-serif" }}>
+        <NavBar />
 
-      {/* Route definitions */}
-      <Routes>
-        <Route path="/" element={<Home />} />
-        <Route path="/about" element={<About />} />
-        <Route path="/health" element={<Health />} />
-        <Route path="*" element={<NotFound />} />
-        <Route path="/companies" element={<Companies />} />
-        <Route path="/company/:symbol" element={<CompanyPage />} />
-
-        <Route path="/auth-test" element={<AuthTest />} />
-
-        <Route path="*" element={<NotFound />} />
-      </Routes>
-    </div>
+        <Routes>
+          <Route path="/" element={<Home />} />
+          <Route path="/about" element={<About />} />
+          <Route path="/health" element={<Health />} />
+          <Route path="*" element={<NotFound />} />
+          <Route path="/companies" element={<Companies />} />
+          <Route path="/company/:symbol" element={<CompanyPage />} />
+          <Route path="/auth-test" element={<AuthTest />} />
+        </Routes>
+      </div>
+    </AuthProvider>
   );
 }
 

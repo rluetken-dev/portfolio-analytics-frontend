@@ -15,20 +15,28 @@ import NavBar from "./components/NavBar";
 // Import AuthProvider
 import { AuthProvider } from "./context/AuthProvider";
 
+import { ProtectedRoute } from "./components/ProtectedRoute";
+
 function App() {
   return (
     <AuthProvider>
       <div style={{ padding: "2rem", fontFamily: "Arial, sans-serif" }}>
         <NavBar />
-
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/about" element={<About />} />
           <Route path="/health" element={<Health />} />
-          <Route path="*" element={<NotFound />} />
-          <Route path="/companies" element={<Companies />} />
-          <Route path="/company/:symbol" element={<CompanyPage />} />
-          <Route path="/login" element={<Login />} /> {/* 🔹 NEU */}
+          <Route path="/companies" element={
+            <ProtectedRoute>
+              <Companies />
+            </ProtectedRoute>
+          } />
+          <Route path="/company/:symbol" element={
+            <ProtectedRoute>
+              <CompanyPage />
+            </ProtectedRoute>
+          } />
+          <Route path="/login" element={<Login />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </div>

@@ -4,6 +4,8 @@ import type { User } from "../types/auth";
 import { AuthContext } from "./auth-context";
 import { login as apiLogin } from "../services/api/auth";
 import { setAccessToken } from "../utils/token";
+import { logout as apiLogout } from "../services/api/auth";
+import { clearAccessToken } from "../utils/token";
 
 // AuthProvider: wraps the app and provides auth state + actions
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -22,7 +24,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function logout() {
-    console.log("logout() not implemented yet");
+    try {
+      await apiLogout(); // call backend logout
+    } catch (err) {
+      console.warn("Logout request failed:", err);
+    } finally {
+      clearAccessToken(); // always clear token
+      setUser(null); // clear user state
+      console.log("User logged out");
+    }
   }
 
   return (

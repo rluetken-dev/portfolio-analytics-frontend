@@ -1,4 +1,5 @@
 // src/services/api/client.ts
+import { getAccessToken, setAccessToken, clearAccessToken } from "../../utils/token";
 
 /**
  * Small, typed helper around fetch() for our frontend API calls.
@@ -98,8 +99,10 @@ export async function fetchJson<TResponse = unknown, TBody = unknown>(
         headers: {
           Accept: "application/json",
           ...(hasBody ? { "Content-Type": "application/json" } : {}),
+          ...(getAccessToken() ? { Authorization: `Bearer ${getAccessToken()}` } : {}), // ⬅️ NEW
           ...headers,
         },
+        credentials: "include",
         body: hasBody ? JSON.stringify(body) : undefined,
         signal: controller.signal,
       });
@@ -121,6 +124,32 @@ export async function fetchJson<TResponse = unknown, TBody = unknown>(
       }
 
       if (!res.ok) {
+        // 🔄 Auto-refresh if 401 Unauthorized
+        if (res.status === 401) {
+          const refreshResponse = await fetch(buildUrl("/api/User/refresh"), {
+            method: "POST",
+            credentials: "include", // send refreshToken cookie
+          });
+
+          if (refreshResponse.ok) {
+            const data = (await refreshResponse.json()) as { accessToken: string };
+            setAccessToken(data.accessToken);
+
+            // Retry the original request with new token
+            return fetchJson<TResponse, TBody>({
+              method,
+              path,
+              body,
+              headers,
+              timeoutMs,
+              retry,
+            });
+          } else {
+            clearAccessToken();
+            throw new Error("Unauthorized and refresh failed");
+          }
+        }
+
         try {
           type ErrorPayload = { message?: string; [k: string]: unknown };
           const maybeJson = (await res.json()) as ErrorPayload;

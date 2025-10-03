@@ -6,11 +6,13 @@ For a quick overview and badges, see the root [README.md](./README.md).
 ---
 
 ## Overview
+
 - **Purpose:** Modern React/Vite app for exploring companies, fetching & visualizing analytics, and managing watchlists.
 - **UX:** Clear, compact **status messages**; graceful handling of free‑tier and rate‑limit constraints.
 - **Integration:** Connects to the .NET backend at `VITE_API_URL` (default `http://localhost:5179`).
 
 ## Key Features
+
 - **🔍 Smart Company Search** — local‑first search, offline popular bundle, external fallback.
 - **📊 Real‑time Analytics** — inline KPIs, simple sparkline, charts.
 - **🏢 Company Management** — add/remove/track companies with quick actions (Mega‑Cap, Tech Giants, Dow 30, …).
@@ -19,6 +21,7 @@ For a quick overview and badges, see the root [README.md](./README.md).
 - **🧭 Routing** — multi‑page app with React Router.
 
 ## Tech Stack
+
 - **React 19.1.1**
 - **TypeScript 5.8.3**
 - **Vite 7.1.2**
@@ -28,6 +31,7 @@ For a quick overview and badges, see the root [README.md](./README.md).
 - Node ≥ 20
 
 ## Project Structure
+
 ```
 src/
 ├── pages/
@@ -66,26 +70,39 @@ src/
 ```
 
 ## Components (highlights)
+
 ### CompanyDiscovery
+
 - Three discovery paths: **quick‑add buttons**, **search over offline bundle**, **external fallback**.
+
 ### Notification System
+
 - Auto‑dismiss success/error, consistent styling, click to dismiss.
+
 ### ConfirmDialog
+
 - Replaces `confirm()` with themed modal; variants: danger/warning/info; backdrop‑to‑cancel.
+
 ### AnalyticsMiniPanel
+
 - Inline analytics: KPIs, sparkline, **Get/Save fundamentals**, **Get live price**.
 
 ## Environment & Config
+
 Create `.env.development`:
+
 ```env
 VITE_API_URL=http://localhost:5179
 VITE_APP_TITLE="Portfolio Analytics"
 ```
+
 Ports:
+
 - **Frontend dev**: `http://localhost:5173`
 - **Backend**: `http://localhost:5179` (Swagger at `/swagger`)
 
 ## Scripts
+
 ```bash
 npm run dev          # start Vite dev server
 npm run build        # production build
@@ -97,23 +114,28 @@ npm run test:status  # status message smoke tests
 ```
 
 ## Status Messages (semantics)
+
 The UI maps responses to **clear categories**:
+
 - `200` → ✔️ Request successful
 - `404` → ❌ No data found
 - `400` → ⚠️ Bad request
 - `402` (or text markers) → ⛔ Free‑tier limit
 - `429` (or text markers) → ⏳ Rate limit (e.g., `Daily limit`, `Rate limit (10s)`)
 - `5xx` → ⚠️ Server error
-> Embedded `402/429` inside `5xx` are still recognized by text hints.
+  > Embedded `402/429` inside `5xx` are still recognized by text hints.
 
 **Tests**
+
 ```bash
 npm run test:status
 # File: src/utils/statusMessages.test.ts
 ```
+
 The test simulates cases (200/400/404/402/429/5xx incl. embedded hints) and checks the pill + status line.
 
 ## API Integration
+
 - HTTP layer in `src/services/api/*` with minimal client helpers.
 - Endpoints:
   - **Analytics**: `/api/analytics/<metric>?symbol=XYZ`
@@ -122,26 +144,32 @@ The test simulates cases (200/400/404/402/429/5xx incl. embedded hints) and chec
 - Strategy: **local‑first** in backend + client‑side debouncing to reduce calls (free tier).
 
 ## State Management
+
 - Local component state (hooks), route state via React Router.
 - Persistence via `localStorage` for small preferences (e.g., pinned symbols).
 
 ## Performance
+
 - Route‑level code splitting, memoization, debounced search.
 - Lightweight sparkline (pure SVG), minimal re‑renders.
 
 ## Browser Support
+
 - Chrome/Edge/Firefox/Safari (latest), and modern mobile browsers.
 
 ## Contributing
+
 - Conventional Commits (`feat:`, `fix:`, `docs:`, …)
 - Feature branches → PRs
 
 ## Known Issues
+
 - Search & ingestion depend on provider free tiers (may hit **rate/free‑tier limits**).
 - Some ETFs/firms may have incomplete fundamentals.
 - Candles require sufficient history.
 
 ## Roadmap
+
 - Dark mode
 - Export (CSV/Excel)
 - Portfolio tracking & watchlists
@@ -150,10 +178,12 @@ The test simulates cases (200/400/404/402/429/5xx incl. embedded hints) and chec
 - Mobile app (React Native)
 
 ## Docs & Links
+
 - **Backend Swagger:** http://localhost:5179/swagger
 - **Analytics endpoints (backend doc):** ../backend/docs/analytics-endpoints.md
 - **Commit conventions:** https://www.conventionalcommits.org/
 
 ## License & Author
+
 - MIT — see `LICENSE`
 - Author: rluetken (GitHub: @rluetken-dev)

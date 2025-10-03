@@ -7,9 +7,10 @@
 ![Node](https://img.shields.io/badge/node-%3E%3D20-green)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
-Modern, responsive React/Vite frontend for Portfolio Analytics with clear status messages and API‑conscious UX. 
+Modern, responsive React/Vite frontend for Portfolio Analytics with clear status messages and API‑conscious UX.
 
 ## ✨ Highlights
+
 - **Smart company search** (local-first → offline bundle → external fallback)
 - **Inline analytics** with compact KPIs & charts
 - **Company management** (add/remove/discover)
@@ -17,6 +18,7 @@ Modern, responsive React/Vite frontend for Portfolio Analytics with clear status
 - **Fast & portable build** (Vite + TS)
 
 ## 🚀 Quick Start
+
 ```bash
 git clone https://github.com/rluetken-dev/portfolio-analytics-frontend.git
 cd portfolio-analytics-frontend
@@ -31,6 +33,7 @@ npm run dev
 ```
 
 ## 🔧 Scripts
+
 ```bash
 npm run dev          # start Vite dev server
 npm run build        # production build
@@ -42,12 +45,14 @@ npm run test:status  # status message smoke tests
 ```
 
 ## 🔐 Environment
+
 ```env
 VITE_API_URL=http://localhost:5179
 VITE_APP_TITLE="Portfolio Analytics"
 ```
 
 ## 📁 Structure (short)
+
 ```
 src/
 ├─ pages/ (Companies, Company, Home, Health, About)
@@ -58,7 +63,9 @@ src/
 ```
 
 ## ✅ Status Messages (frontend)
+
 Simple, category‑first mapping:
+
 - `200` → ✔️ **Request successful**
 - `404` → ❌ **No data found**
 - `400` → ⚠️ **Bad request**
@@ -67,12 +74,14 @@ Simple, category‑first mapping:
 - `5xx` → ⚠️ **Server error**
 
 Tests:
+
 ```bash
 npm run test:status
 # File: src/utils/statusMessages.test.ts
 ```
 
 ## 📖 Documentation
+
 - **Detailed guide**: [README.md](./docs/README.md)
 - **Backend Swagger**: http://localhost:5179/swagger
 - **Analytics endpoints**: ../backend/docs/analytics-endpoints.md

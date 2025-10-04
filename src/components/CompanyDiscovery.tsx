@@ -14,6 +14,7 @@ interface BulkAddResponse {
 
 // search result types
 interface CompanySearchResult {
+  id: number;
   symbol: string;
   name: string;
   exchange?: string;
@@ -71,10 +72,24 @@ const CompanyDiscovery: React.FC<CompanyDiscoveryProps> = ({ onCompanyAdded, onN
 
     setIsSearching(true);
     try {
+      // Fetch search results from the global companies table
       const response = await fetchJson<CompanySearchResponse>({
         path: `/api/companies/search?q=${encodeURIComponent(query)}&limit=10`,
       });
-      setSearchResults(response.results || []);
+
+      // Fetch current user's portfolio (symbols only)
+      const userCompanies = await fetchJson<Array<{ symbol: string }>>({
+        path: "/api/UserCompany",
+      });
+      const userSymbols = new Set(userCompanies.map((c) => c.symbol.toUpperCase()));
+
+      // Merge both lists to mark which ones are already in the user's portfolio
+      const merged = (response.results || []).map((r) => ({
+        ...r,
+        isInDatabase: userSymbols.has(r.symbol.toUpperCase()),
+      }));
+
+      setSearchResults(merged);
     } catch (error) {
       console.error("Search failed:", error);
       setSearchResults([]);
@@ -83,27 +98,44 @@ const CompanyDiscovery: React.FC<CompanyDiscoveryProps> = ({ onCompanyAdded, onN
     }
   }, []);
 
-  // add single company
+  // Adds a company to both database (if missing) and user portfolio
   const addSingleCompany = useCallback(
     async (symbol: string) => {
       setIsAdding((prev) => ({ ...prev, [symbol]: true }));
 
       try {
+        // Step 1️⃣ — try to get or create the ticker
+        let tickerId: number | null = null;
+
+        // If the company already exists locally, we can just use its ID
+        const existing = searchResults.find((r) => r.symbol === symbol && r.isInDatabase);
+        if (existing) {
+          tickerId = existing.id ?? null;
+        } else {
+          // otherwise, create it first
+          const added = await fetchJson<{ id: number }>({
+            path: "/api/companies/add",
+            method: "POST",
+            body: { symbol },
+          });
+          tickerId = added.id;
+        }
+
+        if (!tickerId) throw new Error("Invalid ticker ID");
+
+        // Step 2️⃣ — add to user's portfolio
         await fetchJson({
-          path: "/api/companies/add",
+          path: "/api/UserCompany",
           method: "POST",
-          body: { symbol },
+          body: {
+            tickerId,
+            shares: 0,
+            purchasePrice: 0,
+            notes: "",
+          },
         });
 
-        // update search result to show it's now in DB
-        setSearchResults((prev) =>
-          prev.map((result) =>
-            result.symbol === symbol ? { ...result, isInDatabase: true } : result,
-          ),
-        );
-        // show success notification
-        onNotification?.(`Company ${symbol} added successfully`, "success");
-        setSearchQuery("");
+        onNotification?.(`Company ${symbol} added to your portfolio!`, "success");
         onCompanyAdded?.();
       } catch (error) {
         console.error("Add failed:", error);
@@ -112,8 +144,9 @@ const CompanyDiscovery: React.FC<CompanyDiscoveryProps> = ({ onCompanyAdded, onN
         setIsAdding((prev) => ({ ...prev, [symbol]: false }));
       }
     },
-    [onCompanyAdded, onNotification],
+    [onCompanyAdded, onNotification, searchResults],
   );
+
 
   // debounced search effect
   React.useEffect(() => {

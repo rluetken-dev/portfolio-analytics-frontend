@@ -221,7 +221,7 @@ export default function Companies() {
   const searchRef = useRef<HTMLInputElement>(null);
 
   /** Helper to refetch the list (centralizes side-effects).
-   *  EN: Pure server-side search via ?q=... (symbol OR name, case-insensitive) */
+   *  Pure server-side search via ?q=... (symbol OR name, case-insensitive) */
   const load = useCallback(
     async (opts?: { q?: string; limit?: number }) => {
       setLoading(true);
@@ -233,7 +233,10 @@ export default function Companies() {
         if (raw) params.set("q", raw);
         if (lim) params.set("limit", String(lim));
 
-        const path = params.toString() ? `/api/companies?${params.toString()}` : `/api/companies`;
+        /** Unified companies endpoint for current user (Admin included for now) */
+        const basePath = "/api/UserCompany";
+        const path = params.toString() ? `${basePath}?${params.toString()}` : basePath;
+
         const data = await fetchJson<CompanySummary[]>({ path });
 
         setItems(Array.isArray(data) ? data : []);

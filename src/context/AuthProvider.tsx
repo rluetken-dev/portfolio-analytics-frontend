@@ -35,7 +35,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     }
 
-    initAuth();
+    void initAuth();
   }, []);
 
   // login wrapper
@@ -63,7 +63,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       clearAccessToken();
       setUser(null);
       console.log("User logged out");
-      navigate("/login"); // 🔹 redirect after logout
+      navigate("/login"); // redirect after logout
     }
   }
 
@@ -73,7 +73,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         user,
         isAuthenticated: !!user,
         login,
-        logout, // use the unified logout
+        logout,
       }}
     >
       {children}

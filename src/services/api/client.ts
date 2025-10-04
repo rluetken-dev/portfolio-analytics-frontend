@@ -21,6 +21,14 @@ export interface FetchJsonOptions<TBody = unknown> {
   };
 }
 
+/** Custom Error type (for ProblemDetails support) */
+interface HttpError extends Error {
+  status?: number;
+  title?: string;
+  detail?: string;
+  traceId?: string;
+}
+
 /**
  * Read base URL from Vite env (must start with VITE_)
  * Example (development): VITE_API_BASE_URL=http://localhost:5000
@@ -128,14 +136,14 @@ export async function fetchJson<TResponse = unknown, TBody = unknown>(
         if (res.status === 401 && !path.includes("/api/User/login")) {
           const refreshResponse = await fetch(buildUrl("/api/User/refresh"), {
             method: "POST",
-            credentials: "include", // send refreshToken cookie
+            credentials: "include",
           });
 
           if (refreshResponse.ok) {
             const data = (await refreshResponse.json()) as { accessToken: string };
             setAccessToken(data.accessToken);
 
-            // Retry the original request with new token
+            // 🔁 Retry the original request with the new token
             return fetchJson<TResponse, TBody>({
               method,
               path,
@@ -152,24 +160,32 @@ export async function fetchJson<TResponse = unknown, TBody = unknown>(
           }
         }
 
-        let errorMessage = `HTTP ${res.status} ${res.statusText}`;
-        try {
-          const contentType = res.headers.get("content-type");
-          if (contentType && contentType.includes("application/json")) {
-            const data = (await res.json()) as { message?: string };
-            if (data.message) {
-              errorMessage = data.message; // ✅ take backend message if available
-            }
+        /** 🧩 Handle standardized ProblemDetails response */
+        const contentType = res.headers.get("content-type");
+        let err: HttpError;
+
+        if (contentType && contentType.includes("application/json")) {
+          const data = await res.json().catch(() => ({}));
+
+          if (data?.title && data?.status) {
+            // ✅ Proper ProblemDetails from backend
+            err = new Error(data.detail ?? data.title) as HttpError;
+            err.status = data.status;
+            err.title = data.title;
+            err.detail = data.detail;
+            err.traceId = data.traceId;
           } else {
-            const text = await res.text().catch(() => "");
-            if (text) errorMessage = text;
+            // fallback: legacy JSON error with message
+            err = new Error(data.message ?? `HTTP ${res.status}`) as HttpError;
+            err.status = res.status;
           }
-        } catch {
-          // ignore JSON/text parsing errors and keep default errorMessage
+        } else {
+          const text = await res.text().catch(() => "");
+          err = new Error(text || `HTTP ${res.status}`) as HttpError;
+          err.status = res.status;
         }
 
-        const err: HttpError = new Error(errorMessage);
-        err.status = res.status;
+        console.error("API Error:", err);
         throw err;
       }
 

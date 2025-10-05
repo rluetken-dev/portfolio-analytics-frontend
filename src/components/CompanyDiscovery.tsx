@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import { fetchJson } from "../services/api/client";
 
 // response type for bulk add
@@ -20,6 +20,7 @@ interface CompanySearchResult {
   exchange?: string;
   sector?: string;
   isInDatabase: boolean;
+  isInUserPortfolio: boolean;
 }
 
 interface CompanySearchResponse {
@@ -31,9 +32,14 @@ interface CompanySearchResponse {
 interface CompanyDiscoveryProps {
   onCompanyAdded?: () => void;
   onNotification?: (message: string, type: "success" | "error" | "info") => void;
+  removedSymbol?: string | null;
 }
 
-const CompanyDiscovery: React.FC<CompanyDiscoveryProps> = ({ onCompanyAdded, onNotification }) => {
+const CompanyDiscovery = ({
+  onCompanyAdded,
+  onNotification,
+  removedSymbol,
+}: CompanyDiscoveryProps) => {
   const [showDiscovery, setShowDiscovery] = useState(false);
 
   // search state
@@ -41,6 +47,19 @@ const CompanyDiscovery: React.FC<CompanyDiscoveryProps> = ({ onCompanyAdded, onN
   const [searchResults, setSearchResults] = useState<CompanySearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [isAdding, setIsAdding] = useState<Record<string, boolean>>({});
+
+  // 🧩 React to company removal signal from parent (Companies.tsx)
+  useEffect(() => {
+    if (!removedSymbol) return;
+
+    setSearchResults((prev: CompanySearchResult[]) =>
+      prev.map((c) =>
+        c.symbol.toUpperCase() === removedSymbol.toUpperCase()
+          ? { ...c, isInUserPortfolio: false }
+          : c,
+      ),
+    );
+  }, [removedSymbol]);
 
   // bulk add popular companies
   const addPopularCompanies = useCallback(
@@ -72,24 +91,13 @@ const CompanyDiscovery: React.FC<CompanyDiscoveryProps> = ({ onCompanyAdded, onN
 
     setIsSearching(true);
     try {
-      // Fetch search results from the global companies table
+      // Fetch search results directly from backend (already includes user portfolio info)
       const response = await fetchJson<CompanySearchResponse>({
         path: `/api/companies/search?q=${encodeURIComponent(query)}&limit=10`,
       });
 
-      // Fetch current user's portfolio (symbols only)
-      const userCompanies = await fetchJson<Array<{ symbol: string }>>({
-        path: "/api/UserCompany",
-      });
-      const userSymbols = new Set(userCompanies.map((c) => c.symbol.toUpperCase()));
-
-      // Merge both lists to mark which ones are already in the user's portfolio
-      const merged = (response.results || []).map((r) => ({
-        ...r,
-        isInDatabase: userSymbols.has(r.symbol.toUpperCase()),
-      }));
-
-      setSearchResults(merged);
+      // ✅ Just use what the backend gives us — no manual merging needed
+      setSearchResults(response.results || []);
     } catch (error) {
       console.error("Search failed:", error);
       setSearchResults([]);
@@ -98,55 +106,70 @@ const CompanyDiscovery: React.FC<CompanyDiscoveryProps> = ({ onCompanyAdded, onN
     }
   }, []);
 
-  // Adds a company to both database (if missing) and user portfolio
+  // Adds a company to the user's portfolio (auto-creates global ticker if missing)
   const addSingleCompany = useCallback(
     async (symbol: string) => {
       setIsAdding((prev) => ({ ...prev, [symbol]: true }));
 
       try {
-        // Step 1️⃣ — try to get or create the ticker
-        let tickerId: number | null = null;
+        // 1️⃣ Try to find the ticker in the global list first
+        const tickerResponse = await fetchJson<Array<{ id: number; symbol: string }>>({
+          path: `/api/companies?q=${encodeURIComponent(symbol)}`,
+          method: "GET",
+        });
 
-        // If the company already exists locally, we can just use its ID
-        const existing = searchResults.find((r) => r.symbol === symbol && r.isInDatabase);
-        if (existing) {
-          tickerId = existing.id ?? null;
-        } else {
-          // otherwise, create it first
-          const added = await fetchJson<{ id: number }>({
-            path: "/api/companies/add",
-            method: "POST",
-            body: { symbol },
-          });
-          tickerId = added.id;
-        }
+        const tickerId = tickerResponse?.[0]?.id ?? null;
 
-        if (!tickerId) throw new Error("Invalid ticker ID");
-
-        // Step 2️⃣ — add to user's portfolio
+        // 2️⃣ Send both tickerId (if known) and symbol — backend handles missing tickers automatically
         await fetchJson({
           path: "/api/UserCompany",
           method: "POST",
           body: {
-            tickerId,
+            tickerId, // may be null — backend will create ticker if needed
+            symbol, // always provide symbol for safety
             shares: 0,
             purchasePrice: 0,
             notes: "",
           },
         });
 
+        // ✅ Success notification
         onNotification?.(`Company ${symbol} added to your portfolio!`, "success");
+
+        // ✅ Immediately update UI: mark this company as 'inPortfolio'
+        setSearchResults((prev) =>
+          prev.map((c) =>
+            c.symbol.toUpperCase() === symbol.toUpperCase() ? { ...c, isInUserPortfolio: true } : c,
+          ),
+        );
+
         onCompanyAdded?.();
       } catch (error) {
+        // 3️⃣ Handle typed errors safely
         console.error("Add failed:", error);
-        onNotification?.(`Failed to add ${symbol}`, "error");
+
+        let message = "Failed to add company.";
+
+        if (error instanceof Error) {
+          const errMsg = error.message.toLowerCase();
+
+          if (errMsg.includes("409")) {
+            message = `Company ${symbol} is already in your portfolio.`;
+          } else if (errMsg.includes("400")) {
+            message = `Invalid symbol: ${symbol}`;
+          } else {
+            message = `Failed to add ${symbol}`;
+          }
+        }
+
+        onNotification?.(message, "error");
       } finally {
+        // 4️⃣ Always clear loading state
         setIsAdding((prev) => ({ ...prev, [symbol]: false }));
       }
     },
-    [onCompanyAdded, onNotification, searchResults],
+    [onCompanyAdded, onNotification],
   );
-
 
   // debounced search effect
   React.useEffect(() => {
@@ -323,7 +346,7 @@ const CompanyDiscovery: React.FC<CompanyDiscoveryProps> = ({ onCompanyAdded, onN
                         </div>
                       </div>
                       <div>
-                        {result.isInDatabase ? (
+                        {result.isInUserPortfolio ? (
                           <span
                             style={{
                               padding: "4px 8px",
@@ -334,7 +357,7 @@ const CompanyDiscovery: React.FC<CompanyDiscoveryProps> = ({ onCompanyAdded, onN
                               fontSize: "12px",
                             }}
                           >
-                            ✓ Added
+                            ✓ In Portfolio
                           </span>
                         ) : (
                           <button

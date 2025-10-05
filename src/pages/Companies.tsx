@@ -196,15 +196,20 @@ export default function Companies() {
   // English: selected symbol to show in the analytics panel
   const [selectedSymbol, setSelectedSymbol] = useState<string>("");
 
+  // Signal for child component (CompanyDiscovery) when something was deleted
+  const [removedSymbol, setRemovedSymbol] = useState<string | null>(null);
+
   const [notification, setNotification] = useState<{
     message: string;
     type: "success" | "error" | "info";
   } | null>(null);
 
   // State for delete confirmation dialog
+  // Store both the open state and the specific company being deleted (with ID)
   const [confirmDelete, setConfirmDelete] = useState<{
     isOpen: boolean;
     symbol: string;
+    id: string | number; // ✅ Include UserCompany ID for correct deletion
   } | null>(null);
 
   // English: anchor to scroll the analytics panel into view (optional)
@@ -372,37 +377,42 @@ export default function Companies() {
     }
   };
 
-  // remove company with safety confirmation
+  // Remove a UserCompany safely after confirmation
   const removeCompany = useCallback(
-    async (symbol: string) => {
-      if (!symbol) return;
+    async (id: string | number, symbol: string) => {
+      if (!id) return;
 
       try {
+        // ✅ Trigger update signal for discovery component
+        setRemovedSymbol(symbol.toUpperCase());
+        setTimeout(() => setRemovedSymbol(null), 500);
+
+        // ✅ Call correct endpoint to remove only the UserCompany relationship
         await fetchJson({
-          path: `/api/admin/tickers/${encodeURIComponent(symbol)}`,
+          path: `/api/UserCompany/${id}`,
           method: "DELETE",
         });
 
-        // refresh the companies list
+        // Refresh the companies list (optional — keeps state in sync)
         await load({ q: query });
 
-        // show success notification
-        showNotification(`Company ${symbol} removed successfully`, "success");
+        // Show success notification
+        showNotification(`Company ${symbol} removed from your portfolio`, "success");
 
-        // clear selection if the removed company was selected
+        // Clear selection if the removed company was selected
         if (selectedSymbol === symbol) {
           setSelectedSymbol("");
         }
 
-        // close the confirm dialog
+        // Close the confirm dialog
         setConfirmDelete(null);
       } catch (error) {
         console.error("Remove failed:", error);
 
-        // show error notification
+        // Show error notification
         const errorMessage = error instanceof Error ? error.message : String(error);
-        if (errorMessage.includes("has associated financial data")) {
-          showNotification(`Cannot remove ${symbol}: Has financial data`, "error");
+        if (errorMessage.includes("not found")) {
+          showNotification(`Company ${symbol} not found in your portfolio`, "error");
         } else {
           showNotification(`Failed to remove ${symbol}`, "error");
         }
@@ -525,7 +535,11 @@ export default function Companies() {
 
   return (
     <div style={styles.page}>
-      <CompanyDiscovery onCompanyAdded={handleCompanyAdded} onNotification={showNotification} />
+      <CompanyDiscovery
+        onCompanyAdded={handleCompanyAdded}
+        onNotification={showNotification}
+        removedSymbol={removedSymbol}
+      />
       {/* Always show notification (if any), independent of charts */}
       {notification && (
         <Notification
@@ -834,9 +848,43 @@ export default function Companies() {
                             >
                               Details
                             </button>
-
                             {/* Remove Button */}
                             <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setConfirmDelete({ isOpen: true, id: c.id ?? 0, symbol: sym }); // ✅ fallback if id is undefined
+                              }}
+                              title={`Remove ${sym} from your portfolio`}
+                              aria-label={`Remove ${sym} from your portfolio`}
+                              style={{
+                                padding: "2px 6px",
+                                borderRadius: 8,
+                                fontSize: 11,
+                                lineHeight: 1.2,
+                                cursor: "pointer",
+                                border: "1px solid #ef4444",
+                                background: "rgba(239, 68, 68, 0.12)",
+                                color: "#fecaca",
+                                boxShadow: "0 0 0 0 rgba(239,68,68,0)",
+                                transition: "box-shadow 120ms ease, transform 60ms ease",
+                              }}
+                              onMouseDown={(e) => {
+                                e.currentTarget.style.transform = "translateY(1px)";
+                                e.currentTarget.style.boxShadow = "0 0 0 2px rgba(239,68,68,0.25)";
+                              }}
+                              onMouseUp={(e) => {
+                                e.currentTarget.style.transform = "translateY(0)";
+                                e.currentTarget.style.boxShadow = "0 0 0 0 rgba(239,68,68,0)";
+                              }}
+                              onMouseLeave={(e) => {
+                                e.currentTarget.style.transform = "translateY(0)";
+                                e.currentTarget.style.boxShadow = "0 0 0 0 rgba(239,68,68,0)";
+                              }}
+                            >
+                              Remove
+                            </button>
+
+                            {/* <button
                               onClick={(e) => {
                                 e.stopPropagation();
                                 setConfirmDelete({ isOpen: true, symbol: sym });
@@ -880,7 +928,7 @@ export default function Companies() {
                               }}
                             >
                               Remove
-                            </button>
+                            </button> */}
                           </>
                         )}
 
@@ -995,7 +1043,7 @@ export default function Companies() {
           cancelText="Cancel"
           variant="danger"
           onConfirm={() => {
-            removeCompany(confirmDelete.symbol);
+            removeCompany(confirmDelete.id, confirmDelete.symbol);
           }}
           onCancel={() => setConfirmDelete(null)}
         />

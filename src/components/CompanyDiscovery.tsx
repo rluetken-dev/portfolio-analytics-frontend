@@ -1,17 +1,6 @@
 import React, { useState, useCallback, useEffect } from "react";
 import { fetchJson } from "../services/api/client";
 
-// response type for bulk add
-interface BulkAddResponse {
-  added: Array<{
-    symbol: string;
-    name: string;
-    sector?: string;
-  }>;
-  errors: string[];
-  totalAdded: number;
-}
-
 // search result types
 interface CompanySearchResult {
   id: number;
@@ -61,39 +50,50 @@ const CompanyDiscovery = ({
     );
   }, [removedSymbol]);
 
-  // Bulk add: adds popular companies globally AND to the user's portfolio
+  // Bulk add popular companies and link them to the user's portfolio
   const addPopularCompanies = useCallback(
     async (category: string) => {
       try {
-        const response = await fetchJson<BulkAddResponse>({
+        // 1️⃣ Call backend to add or fetch popular tickers
+        const response = await fetchJson<{
+          added: Array<{ id: number; symbol: string }>;
+          existing: Array<{ id: number; symbol: string }>;
+          errors: string[];
+        }>({
           path: "/api/companies/add-popular",
           method: "POST",
           body: { category, limit: 10 },
         });
 
-        console.log("Added companies globally:", response);
+        // 2️⃣ Merge both newly added and existing tickers
+        const allTickers = [...(response.added || []), ...(response.existing || [])];
 
-        // ✅ Now also add each to the current user's portfolio
-        if (response.added && response.added.length > 0) {
-          for (const c of response.added) {
-            try {
-              await fetchJson({
-                path: "/api/UserCompany",
-                method: "POST",
-                body: {
-                  symbol: c.symbol,
-                  shares: 0,
-                  purchasePrice: 0,
-                  notes: "",
-                },
-              });
-            } catch (err) {
-              console.warn(`Skipping ${c.symbol}:`, err);
-            }
+        if (allTickers.length === 0) {
+          onNotification?.("No companies were added or found.", "info");
+          return;
+        }
+
+        // 3️⃣ Add each ticker to the current user's portfolio
+        for (const t of allTickers) {
+          try {
+            await fetchJson({
+              path: "/api/UserCompany",
+              method: "POST",
+              body: {
+                tickerId: t.id,
+                symbol: t.symbol,
+                shares: 0,
+                purchasePrice: 0,
+                notes: "",
+              },
+            });
+          } catch {
+            console.warn(`Skipping ${t.symbol}: already in portfolio`);
           }
         }
 
-        onNotification?.(`Added ${response.totalAdded} companies to your portfolio!`, "success");
+        // 4️⃣ Notify user and reload portfolio list
+        onNotification?.(`Added ${allTickers.length} companies to your portfolio!`, "success");
         onCompanyAdded?.();
       } catch (error) {
         console.error("Failed to add companies:", error);

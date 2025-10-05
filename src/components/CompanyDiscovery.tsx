@@ -146,11 +146,11 @@ const CompanyDiscovery = ({
           path: "/api/UserCompany",
           method: "POST",
           body: {
-            tickerId, // may be null — backend will create ticker if needed
-            symbol, // always provide symbol for safety
-            shares: 0,
-            purchasePrice: 0,
-            notes: "",
+            TickerId: tickerId, // capitalized to match backend DTO
+            Symbol: symbol, // capitalized
+            Shares: 0,
+            PurchasePrice: 0,
+            Notes: "",
           },
         });
 

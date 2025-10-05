@@ -106,9 +106,9 @@ export async function fetchJson<TResponse = unknown, TBody = unknown>(
         method,
         headers: {
           Accept: "application/json",
-          ...(hasBody ? { "Content-Type": "application/json" } : {}),
-          ...(getAccessToken() ? { Authorization: `Bearer ${getAccessToken()}` } : {}), // ⬅️ NEW
+          ...(getAccessToken() ? { Authorization: `Bearer ${getAccessToken()}` } : {}),
           ...headers,
+          ...(hasBody ? { "Content-Type": "application/json" } : {}),
         },
         credentials: "include",
         body: hasBody ? JSON.stringify(body) : undefined,

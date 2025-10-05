@@ -18,6 +18,7 @@ export interface UserCompany {
   tickerId: number;
   symbol: string;
   name: string;
+  sector?: string | null;
   shares?: number | null;
   purchasePrice?: number | null;
   notes?: string | null;

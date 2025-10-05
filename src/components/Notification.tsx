@@ -23,7 +23,7 @@ const Notification: React.FC<NotificationProps> = ({ message, type, duration = 3
   const getStyles = () => {
     const baseStyles = {
       position: "fixed" as const,
-      top: "20px",
+      bottom: "20px",
       right: "20px",
       padding: "12px 16px",
       borderRadius: "8px",

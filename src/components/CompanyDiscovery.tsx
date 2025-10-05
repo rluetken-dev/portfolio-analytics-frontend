@@ -61,7 +61,7 @@ const CompanyDiscovery = ({
     );
   }, [removedSymbol]);
 
-  // bulk add popular companies
+  // Bulk add: adds popular companies globally AND to the user's portfolio
   const addPopularCompanies = useCallback(
     async (category: string) => {
       try {
@@ -71,8 +71,29 @@ const CompanyDiscovery = ({
           body: { category, limit: 10 },
         });
 
-        console.log("Added companies:", response);
-        onNotification?.(`Added ${response.totalAdded} companies!`, "success");
+        console.log("Added companies globally:", response);
+
+        // ✅ Now also add each to the current user's portfolio
+        if (response.added && response.added.length > 0) {
+          for (const c of response.added) {
+            try {
+              await fetchJson({
+                path: "/api/UserCompany",
+                method: "POST",
+                body: {
+                  symbol: c.symbol,
+                  shares: 0,
+                  purchasePrice: 0,
+                  notes: "",
+                },
+              });
+            } catch (err) {
+              console.warn(`Skipping ${c.symbol}:`, err);
+            }
+          }
+        }
+
+        onNotification?.(`Added ${response.totalAdded} companies to your portfolio!`, "success");
         onCompanyAdded?.();
       } catch (error) {
         console.error("Failed to add companies:", error);

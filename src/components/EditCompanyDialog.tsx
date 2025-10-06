@@ -1,13 +1,13 @@
 import React, { useEffect, useState } from "react";
 import { getCurrentPrice } from "../services/api/quotes";
 
-interface AddCompanyDialogProps {
+interface EditCompanyDialogProps {
   symbol: string;
-  onConfirm: (data: { shares: number; purchasePrice: number; notes: string }) => void;
   onCancel: () => void;
+  onConfirm: (data: { shares: number; purchasePrice: number | null; notes: string }) => void;
 }
 
-const AddCompanyDialog: React.FC<AddCompanyDialogProps> = ({ symbol, onConfirm, onCancel }) => {
+const EditCompanyDialog: React.FC<EditCompanyDialogProps> = ({ symbol, onConfirm, onCancel }) => {
   const [shares, setShares] = useState<number>(1);
   const [purchasePrice, setPurchasePrice] = useState<number | null>(null);
   const [notes, setNotes] = useState("");
@@ -47,18 +47,13 @@ const AddCompanyDialog: React.FC<AddCompanyDialogProps> = ({ symbol, onConfirm, 
   }, [symbol]);
 
   const handleConfirm = () => {
-    if (!isValid()) {
-      setError("Please enter valid numbers for shares and price.");
-      return;
-    }
-
-    // Use current price if available, otherwise send -1 to mark missing price
+    // Use explicit price if provided, otherwise use current price, otherwise send null
     const finalPrice =
       purchasePrice && purchasePrice > 0
         ? purchasePrice
         : currentPrice && currentPrice > 0
           ? currentPrice
-          : -1; // 👈 sentinel value meaning "price fetch failed"
+          : null; // 👈 null means "no price specified — backend should use current price"
 
     onConfirm({
       shares,
@@ -277,4 +272,4 @@ const AddCompanyDialog: React.FC<AddCompanyDialogProps> = ({ symbol, onConfirm, 
   );
 };
 
-export default AddCompanyDialog;
+export default EditCompanyDialog;

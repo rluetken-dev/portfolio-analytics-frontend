@@ -8,16 +8,26 @@ interface AddCompanyDialogProps {
 }
 
 const AddCompanyDialog: React.FC<AddCompanyDialogProps> = ({ symbol, onConfirm, onCancel }) => {
-  const [shares, setShares] = useState<number>(0);
+  const [shares, setShares] = useState<number>(1);
   const [purchasePrice, setPurchasePrice] = useState<number | null>(null);
   const [notes, setNotes] = useState("");
   const [currentPrice, setCurrentPrice] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // const [currencySymbol, setCurrencySymbol] = useState("$");
 
+  // currency symbol - easy to change or replace later
+  const currencySymbol = "$";
+
+  // 🧩 validation allowing default "Current price" (null) as valid
   const isValid = (): boolean => {
+    // must have at least 1 share
     if (shares <= 0) return false;
-    if (!purchasePrice || purchasePrice <= 0) return false;
+
+    // purchasePrice can be undefined/null (means use current price)
+    if (purchasePrice !== null && purchasePrice !== undefined && purchasePrice < 0) return false;
+
+    // notes are always valid (optional)
     return true;
   };
 
@@ -41,7 +51,20 @@ const AddCompanyDialog: React.FC<AddCompanyDialogProps> = ({ symbol, onConfirm, 
       setError("Please enter valid numbers for shares and price.");
       return;
     }
-    onConfirm({ shares, purchasePrice: purchasePrice!, notes });
+
+    // Use current price if available, otherwise send -1 to mark missing price
+    const finalPrice =
+      purchasePrice && purchasePrice > 0
+        ? purchasePrice
+        : currentPrice && currentPrice > 0
+          ? currentPrice
+          : -1; // 👈 sentinel value meaning "price fetch failed"
+
+    onConfirm({
+      shares,
+      purchasePrice: finalPrice,
+      notes,
+    });
   };
 
   return (
@@ -125,47 +148,46 @@ const AddCompanyDialog: React.FC<AddCompanyDialogProps> = ({ symbol, onConfirm, 
             </div>
 
             {/* Purchase Price input */}
-            <div style={{ marginBottom: "12px" }}>
-              <label
+            <div style={{ position: "relative", width: "100%", marginBottom: "12px" }}>
+              {/* currency symbol, dynamically set */}
+              <span
                 style={{
-                  display: "block",
-                  marginBottom: "4px",
+                  position: "absolute",
+                  left: "10px",
+                  top: "50%",
+                  transform: "translateY(-50%)",
+                  color: "#6b7280",
                   fontSize: "14px",
-                  fontWeight: 500,
                 }}
               >
-                Purchase Price:
-              </label>
+                {currencySymbol}
+              </span>
+
               <input
                 type="number"
                 value={purchasePrice ?? ""}
                 onChange={(e) => {
                   const value = parseFloat(e.target.value);
-                  // Nur positive Zahlen zulassen
-                  if (isNaN(value) || value <= 0) {
+                  // allow manual input but only positive numbers
+                  if (isNaN(value) || value < 0) {
                     setPurchasePrice(0);
-                    setError("Purchase price must be greater than 0.");
                   } else {
                     setPurchasePrice(value);
-                    setError(null);
                   }
                 }}
-                min={0.01}
+                min={0}
                 step={0.01}
-                placeholder="e.g. 150.00"
+                placeholder="Current price"
                 style={{
                   width: "100%",
-                  padding: "8px",
+                  padding: "8px 8px 8px 22px", // padding for currency symbol
                   borderRadius: "8px",
                   border: "1px solid #d1d5db",
                   fontSize: "14px",
+                  color: purchasePrice ? "#111827" : "#6b7280",
+                  backgroundColor: "#f9fafb",
                 }}
               />
-              {purchasePrice === 0 && (
-                <p style={{ color: "red", fontSize: "12px", marginTop: "4px" }}>
-                  Please enter a valid positive price.
-                </p>
-              )}
             </div>
 
             {/* Notes input */}
@@ -226,10 +248,10 @@ const AddCompanyDialog: React.FC<AddCompanyDialogProps> = ({ symbol, onConfirm, 
               {/* Confirm */}
               <button
                 onClick={handleConfirm}
-                disabled={!isValid()} // ⬅️ Button nur aktiv, wenn gültige Werte
+                disabled={!isValid()}
                 style={{
                   padding: "8px 16px",
-                  backgroundColor: !isValid() ? "#9ca3af" : "#10b981", // grau wenn disabled
+                  backgroundColor: !isValid() ? "#9ca3af" : "#10b981",
                   color: "white",
                   border: "none",
                   borderRadius: "8px",

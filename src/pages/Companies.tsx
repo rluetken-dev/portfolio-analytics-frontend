@@ -7,6 +7,8 @@ import { useNavigate } from "react-router-dom";
 import CompanyDiscovery from "../components/CompanyDiscovery";
 import Notification from "../components/Notification";
 import ConfirmDialog from "../components/ConfirmDialog";
+import EditCompanyDialog from "../components/EditCompanyDialog";
+//import { getCurrentPrice } from "../services/api/quotes";
 
 // English comment: add the small analytics panel component
 import AnalyticsMiniPanel from "../components/AnalyticsMiniPanel";
@@ -192,6 +194,7 @@ export default function Companies() {
   const [query, setQuery] = useState<string>("");
   const [limit, setLimit] = useState<number>(25); // EN: adjustable server page size
   const [sectorFilter, setSectorFilter] = useState<string>("All"); // EN: Sector filter (All = no filter)
+  const [buyDialogCompany, setBuyDialogCompany] = useState<string | null>(null);
 
   // English: selected symbol to show in the analytics panel
   const [selectedSymbol, setSelectedSymbol] = useState<string>("");
@@ -790,7 +793,7 @@ export default function Companies() {
                       <td style={styles.td}>{safeName}</td>
                       <td style={styles.td}>{c.sector ?? "—"}</td>
 
-                      {/* Actions: show "Details" only when the row is currently selected */}
+                      {/* Actions: show buttons only when the row is currently selected */}
                       <td
                         style={{
                           ...styles.tdRight,
@@ -802,6 +805,57 @@ export default function Companies() {
                       >
                         {isSelected && (
                           <>
+                            {/* Buy Button */}
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation(); // prevent triggering parent row click
+                                setBuyDialogCompany(sym); // open the Buy dialog for this symbol
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter" || e.key === " ") {
+                                  e.stopPropagation();
+                                  setBuyDialogCompany(sym); // allow keyboard activation
+                                }
+                              }}
+                              title={`Buy ${sym}`}
+                              aria-label={`Buy ${sym}`}
+                              style={{
+                                // compact action pill style
+                                padding: "2px 6px",
+                                borderRadius: 8,
+                                fontSize: 11,
+                                lineHeight: 1.2,
+                                cursor: "pointer",
+
+                                // green accent to indicate buy action
+                                border: "1px solid #22c55e",
+                                background: "rgba(34, 197, 94, 0.12)",
+                                color: "#dcfce7",
+
+                                // subtle animation polish
+                                boxShadow: "0 0 0 0 rgba(34,197,94,0)",
+                                transition: "box-shadow 120ms ease, transform 60ms ease",
+                              }}
+                              onMouseDown={(e) => {
+                                // pressed visual feedback
+                                e.currentTarget.style.transform = "translateY(1px)";
+                                e.currentTarget.style.boxShadow = "0 0 0 2px rgba(34,197,94,0.25)";
+                              }}
+                              onMouseUp={(e) => {
+                                // reset press animation
+                                e.currentTarget.style.transform = "translateY(0)";
+                                e.currentTarget.style.boxShadow = "0 0 0 0 rgba(34,197,94,0)";
+                              }}
+                              onMouseLeave={(e) => {
+                                // reset animation when leaving the button
+                                e.currentTarget.style.transform = "translateY(0)";
+                                e.currentTarget.style.boxShadow = "0 0 0 0 rgba(34,197,94,0)";
+                              }}
+                            >
+                              Buy
+                            </button>
+
+                            {/* Details Button */}
                             <button
                               onClick={(e) => {
                                 e.stopPropagation(); // keep current row selection
@@ -813,7 +867,7 @@ export default function Companies() {
                                   navigate(`/company/${sym}`);
                                 }
                               }}
-                              title={`Details zu ${sym} öffnen`}
+                              title={`Open details for ${sym}`}
                               aria-label={`Open details for ${sym}`}
                               style={{
                                 // compact, unobtrusive action pill
@@ -823,10 +877,10 @@ export default function Companies() {
                                 lineHeight: 1.2,
                                 cursor: "pointer",
 
-                                // green accent to stand out on dark rows
-                                border: "1px solid #22c55e", // green-500
-                                background: "rgba(34, 197, 94, 0.12)", // soft green fill
-                                color: "#dcfce7", // green-100 text for contrast
+                                // blue accent to indicate info or detail action
+                                border: "1px solid #3b82f6", // Tailwind blue-500
+                                background: "rgba(59, 130, 246, 0.12)", // soft blue fill, 12% opacity
+                                color: "#dbeafe", // light blue text (Tailwind blue-100)
 
                                 // small visual polish
                                 boxShadow: "0 0 0 0 rgba(34,197,94,0)",
@@ -883,52 +937,6 @@ export default function Companies() {
                             >
                               Remove
                             </button>
-
-                            {/* <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setConfirmDelete({ isOpen: true, symbol: sym });
-                              }}
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter" || e.key === " ") {
-                                  e.stopPropagation();
-                                }
-                              }}
-                              title={`Remove ${sym} from database`}
-                              aria-label={`Remove ${sym} from database`}
-                              style={{
-                                // compact, unobtrusive action pill
-                                padding: "2px 6px",
-                                borderRadius: 8,
-                                fontSize: 11,
-                                lineHeight: 1.2,
-                                cursor: "pointer",
-
-                                // red accent for remove action
-                                border: "1px solid #ef4444", // red-500
-                                background: "rgba(239, 68, 68, 0.12)", // soft red fill
-                                color: "#fecaca", // red-200 text for contrast
-
-                                // small visual polish
-                                boxShadow: "0 0 0 0 rgba(239,68,68,0)",
-                                transition: "box-shadow 120ms ease, transform 60ms ease",
-                              }}
-                              onMouseDown={(e) => {
-                                // quick press feedback without layout shift
-                                e.currentTarget.style.transform = "translateY(1px)";
-                                e.currentTarget.style.boxShadow = "0 0 0 2px rgba(239,68,68,0.25)";
-                              }}
-                              onMouseUp={(e) => {
-                                e.currentTarget.style.transform = "translateY(0)";
-                                e.currentTarget.style.boxShadow = "0 0 0 0 rgba(239,68,68,0)";
-                              }}
-                              onMouseLeave={(e) => {
-                                e.currentTarget.style.transform = "translateY(0)";
-                                e.currentTarget.style.boxShadow = "0 0 0 0 rgba(239,68,68,0)";
-                              }}
-                            >
-                              Remove
-                            </button> */}
                           </>
                         )}
 
@@ -1046,6 +1054,30 @@ export default function Companies() {
             removeCompany(confirmDelete.id, confirmDelete.symbol);
           }}
           onCancel={() => setConfirmDelete(null)}
+        />
+      )}
+      {/* Buy company dialog  */}
+      {buyDialogCompany && (
+        <EditCompanyDialog
+          symbol={buyDialogCompany}
+          onCancel={() => setBuyDialogCompany(null)}
+          onConfirm={async (data) => {
+            const finalPrice =
+              data.purchasePrice && data.purchasePrice > 0 ? data.purchasePrice : 0; // fallback if currentPrice not available (shouldn't happen)
+
+            await fetchJson({
+              path: "/api/UserCompany",
+              method: "POST",
+              body: {
+                Symbol: buyDialogCompany,
+                Shares: data.shares,
+                PurchasePrice: finalPrice,
+                Notes: data.notes,
+              },
+            });
+
+            setBuyDialogCompany(null);
+          }}
         />
       )}
     </div>

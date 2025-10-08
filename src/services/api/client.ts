@@ -115,6 +115,8 @@ export async function fetchJson<TResponse = unknown, TBody = unknown>(
         signal: controller.signal,
       });
 
+      console.log("📡 FETCH DEBUG", method, path, { body, headers });
+
       if (
         shouldRetryStatus(res.status) &&
         isRetrySafe(method, path, hasBody) &&
@@ -139,6 +141,17 @@ export async function fetchJson<TResponse = unknown, TBody = unknown>(
             credentials: "include",
           });
 
+          const rawText = await res
+            .clone()
+            .text()
+            .catch(() => "")
+            .then((t) => t.trim());
+          console.log("🚨 FETCH ERROR RAW RESPONSE", {
+            status: res.status,
+            contentType: res.headers.get("content-type"),
+            rawText,
+          });
+
           if (refreshResponse.ok) {
             const data = (await refreshResponse.json()) as { accessToken: string };
             setAccessToken(data.accessToken);
@@ -160,32 +173,66 @@ export async function fetchJson<TResponse = unknown, TBody = unknown>(
           }
         }
 
-        /** 🧩 Handle standardized ProblemDetails response */
+        /** 🧩 Handle standardized ProblemDetails or plain-text error responses */
         const contentType = res.headers.get("content-type");
         let err: HttpError;
 
         if (contentType && contentType.includes("application/json")) {
-          const data = await res.json().catch(() => ({}));
+          let data: unknown;
 
-          if (data?.title && data?.status) {
-            // ✅ Proper ProblemDetails from backend
-            err = new Error(data.detail ?? data.title) as HttpError;
-            err.status = data.status;
-            err.title = data.title;
-            err.detail = data.detail;
-            err.traceId = data.traceId;
+          try {
+            // 🧩 Try to parse as JSON
+            data = await res.json();
+          } catch {
+            // 🧩 Fallback: backend sent plain text but marked as JSON
+            const text = (await res.text().catch(() => "")).trim();
+            data = text ? { message: text } : {};
+          }
+
+          if (typeof data === "object" && data !== null && "title" in data && "status" in data) {
+            // ✅ RFC7807 ProblemDetails (ASP.NET default format)
+            const d = data as {
+              title?: string;
+              detail?: string;
+              status?: number;
+              traceId?: string;
+            };
+            err = new Error(d.detail ?? d.title ?? `HTTP ${res.status}`) as HttpError;
+            err.status = d.status ?? res.status;
+            err.title = d.title;
+            err.detail = d.detail;
+            err.traceId = d.traceId;
+          } else if (
+            typeof data === "object" &&
+            data !== null &&
+            "message" in data &&
+            typeof (data as Record<string, unknown>).message === "string"
+          ) {
+            // ✅ Custom AppException or fallback message structure
+            const d = data as { message: string };
+            err = new Error(d.message) as HttpError;
+            err.status = res.status;
           } else {
-            // fallback: legacy JSON error with message
-            err = new Error(data.message ?? `HTTP ${res.status}`) as HttpError;
+            // ⚙️ Unknown or empty JSON response
+            err = new Error(`HTTP ${res.status}`) as HttpError;
             err.status = res.status;
           }
         } else {
-          const text = await res.text().catch(() => "");
+          // 🧩 Plain text or unknown content-type
+          const text = await res
+            .text()
+            .catch(() => "")
+            .then((t) => t.trim());
           err = new Error(text || `HTTP ${res.status}`) as HttpError;
           err.status = res.status;
         }
 
-        console.error("API Error:", err);
+        console.error("API Error:", {
+          status: res.status,
+          contentType,
+          message: err.message,
+        });
+
         throw err;
       }
 

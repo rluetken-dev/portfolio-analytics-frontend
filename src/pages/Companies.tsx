@@ -1117,16 +1117,38 @@ export default function Companies() {
 
               setToastType("success");
               setToastMsg(message);
-
-              // Optionally trigger portfolio refresh
-              // await loadPortfolio();
             } catch (error: unknown) {
-              // 🚨 Type-safe error handling
-              if (error instanceof Error) {
-                alert(`Transaction failed: ${error.message}`);
-              } else {
-                alert("Transaction failed: Unknown error occurred.");
+              console.error("🔥 API Transaction Error:", error);
+
+              // Default fallback message
+              let message = "Transaction failed.";
+
+              // 🧩 Type-safe extraction of message
+              if (typeof error === "string") {
+                message = error;
+              } else if (error instanceof Error) {
+                message = error.message;
+              } else if (
+                error !== null &&
+                typeof error === "object" &&
+                "message" in error &&
+                typeof (error as Record<string, unknown>).message === "string"
+              ) {
+                message = (error as Record<string, unknown>).message as string;
               }
+
+              // 🧠 Map backend messages to user-friendly texts
+              if (message.includes("Insufficient shares")) {
+                message = "You cannot sell more shares than you currently own.";
+              } else if (message.includes("Unauthorized")) {
+                message = "Your session has expired. Please log in again.";
+              } else if (message.includes("not found")) {
+                message = "The requested company could not be found.";
+              }
+
+              // 🔴 Show styled error toast
+              setToastType("error");
+              setToastMsg(message);
             } finally {
               setBuyDialogCompany(null);
             }

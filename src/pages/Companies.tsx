@@ -194,7 +194,13 @@ export default function Companies() {
   const [query, setQuery] = useState<string>("");
   const [limit, setLimit] = useState<number>(25); // EN: adjustable server page size
   const [sectorFilter, setSectorFilter] = useState<string>("All"); // EN: Sector filter (All = no filter)
-  const [buyDialogCompany, setBuyDialogCompany] = useState<string | null>(null);
+
+  interface SelectedCompany {
+    symbol: string;
+    name: string;
+  }
+
+  const [buyDialogCompany, setBuyDialogCompany] = useState<SelectedCompany | null>(null);
 
   // English: selected symbol to show in the analytics panel
   const [selectedSymbol, setSelectedSymbol] = useState<string>("");
@@ -805,54 +811,57 @@ export default function Companies() {
                       >
                         {isSelected && (
                           <>
-                            {/* Buy Button */}
+                            {/* Trade Button (Buy/Sell) */}
                             <button
                               onClick={(e) => {
                                 e.stopPropagation(); // prevent triggering parent row click
-                                setBuyDialogCompany(sym); // open the Buy dialog for this symbol
+                                setBuyDialogCompany({
+                                  symbol: sym,
+                                  name: c.name && c.name.trim() ? c.name : sym, // fallback if name missing
+                                });
                               }}
                               onKeyDown={(e) => {
                                 if (e.key === "Enter" || e.key === " ") {
                                   e.stopPropagation();
-                                  setBuyDialogCompany(sym); // allow keyboard activation
+                                  setBuyDialogCompany({
+                                    symbol: sym,
+                                    name: c.name && c.name.trim() ? c.name : sym, // fallback if name missing
+                                  });
                                 }
                               }}
-                              title={`Buy ${sym}`}
-                              aria-label={`Buy ${sym}`}
+                              title={`Trade ${sym}`}
+                              aria-label={`Trade ${sym}`}
                               style={{
-                                // compact action pill style
+                                // neutral pill style
                                 padding: "2px 6px",
                                 borderRadius: 8,
                                 fontSize: 11,
                                 lineHeight: 1.2,
                                 cursor: "pointer",
 
-                                // green accent to indicate buy action
-                                border: "1px solid #22c55e",
-                                background: "rgba(34, 197, 94, 0.12)",
-                                color: "#dcfce7",
+                                // neutral theme (blue-gray accent)
+                                border: "1px solid #3b82f6",
+                                background: "rgba(59, 130, 246, 0.12)",
+                                color: "#e0f2fe",
 
-                                // subtle animation polish
-                                boxShadow: "0 0 0 0 rgba(34,197,94,0)",
+                                // subtle animation
+                                boxShadow: "0 0 0 0 rgba(59,130,246,0)",
                                 transition: "box-shadow 120ms ease, transform 60ms ease",
                               }}
                               onMouseDown={(e) => {
-                                // pressed visual feedback
                                 e.currentTarget.style.transform = "translateY(1px)";
-                                e.currentTarget.style.boxShadow = "0 0 0 2px rgba(34,197,94,0.25)";
+                                e.currentTarget.style.boxShadow = "0 0 0 2px rgba(59,130,246,0.25)";
                               }}
                               onMouseUp={(e) => {
-                                // reset press animation
                                 e.currentTarget.style.transform = "translateY(0)";
-                                e.currentTarget.style.boxShadow = "0 0 0 0 rgba(34,197,94,0)";
+                                e.currentTarget.style.boxShadow = "0 0 0 0 rgba(59,130,246,0)";
                               }}
                               onMouseLeave={(e) => {
-                                // reset animation when leaving the button
                                 e.currentTarget.style.transform = "translateY(0)";
-                                e.currentTarget.style.boxShadow = "0 0 0 0 rgba(34,197,94,0)";
+                                e.currentTarget.style.boxShadow = "0 0 0 0 rgba(59,130,246,0)";
                               }}
                             >
-                              Buy
+                              Trade
                             </button>
 
                             {/* Details Button */}
@@ -877,10 +886,10 @@ export default function Companies() {
                                 lineHeight: 1.2,
                                 cursor: "pointer",
 
-                                // blue accent to indicate info or detail action
-                                border: "1px solid #3b82f6", // Tailwind blue-500
-                                background: "rgba(59, 130, 246, 0.12)", // soft blue fill, 12% opacity
-                                color: "#dbeafe", // light blue text (Tailwind blue-100)
+                                // green accent to indicate buy action
+                                border: "1px solid #22c55e",
+                                background: "rgba(34, 197, 94, 0.12)",
+                                color: "#dcfce7",
 
                                 // small visual polish
                                 boxShadow: "0 0 0 0 rgba(34,197,94,0)",
@@ -1056,27 +1065,64 @@ export default function Companies() {
           onCancel={() => setConfirmDelete(null)}
         />
       )}
-      {/* Buy company dialog  */}
+      {/* Trade Dialog (Buy/Sell) */}
       {buyDialogCompany && (
         <EditCompanyDialog
-          symbol={buyDialogCompany}
+          symbol={buyDialogCompany.symbol}
+          name={buyDialogCompany.name}
           onCancel={() => setBuyDialogCompany(null)}
           onConfirm={async (data) => {
-            const finalPrice =
-              data.purchasePrice && data.purchasePrice > 0 ? data.purchasePrice : 0; // fallback if currentPrice not available (shouldn't happen)
+            // 🧱 Define DTO for response typing
+            interface TransactionDto {
+              createdAt: string;
+              shares: number;
+              price: number | null;
+              notes: string | null;
+            }
 
-            await fetchJson({
-              path: "/api/UserCompany",
-              method: "POST",
-              body: {
-                Symbol: buyDialogCompany,
-                Shares: data.shares,
-                PurchasePrice: finalPrice,
-                Notes: data.notes,
-              },
-            });
+            try {
+              const finalPrice =
+                data.purchasePrice && data.purchasePrice > 0 ? data.purchasePrice : null;
 
-            setBuyDialogCompany(null);
+              // ✅ Use typed fetchJson<TResponse, TBody>
+              const result = await fetchJson<
+                TransactionDto,
+                {
+                  symbol: string;
+                  shares: number;
+                  price: number | null;
+                  notes: string;
+                }
+              >({
+                path: "/api/UserCompanyTransactions",
+                method: "POST",
+                body: {
+                  symbol: buyDialogCompany.symbol,
+                  shares: data.shares,
+                  price: finalPrice,
+                  notes: data.notes,
+                },
+              });
+
+              // ✅ Success feedback
+              const action = data.shares > 0 ? "Bought" : "Sold";
+              const shareCount = Math.abs(data.shares);
+              const priceText = result.price ? `$${result.price.toFixed(2)}` : "unknown price";
+
+              alert(`${action} ${shareCount} ${buyDialogCompany} @ ${priceText}`);
+
+              // Optionally trigger portfolio refresh
+              // await loadPortfolio();
+            } catch (error: unknown) {
+              // 🚨 Type-safe error handling
+              if (error instanceof Error) {
+                alert(`Transaction failed: ${error.message}`);
+              } else {
+                alert("Transaction failed: Unknown error occurred.");
+              }
+            } finally {
+              setBuyDialogCompany(null);
+            }
           }}
         />
       )}

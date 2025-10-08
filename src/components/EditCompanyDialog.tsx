@@ -3,31 +3,30 @@ import { getCurrentPrice } from "../services/api/quotes";
 
 interface EditCompanyDialogProps {
   symbol: string;
+  name: string;
   onCancel: () => void;
   onConfirm: (data: { shares: number; purchasePrice: number | null; notes: string }) => void;
 }
 
-const EditCompanyDialog: React.FC<EditCompanyDialogProps> = ({ symbol, onConfirm, onCancel }) => {
+const EditCompanyDialog: React.FC<EditCompanyDialogProps> = ({
+  symbol,
+  name,
+  onConfirm,
+  onCancel,
+}) => {
   const [shares, setShares] = useState<number>(1);
   const [purchasePrice, setPurchasePrice] = useState<number | null>(null);
   const [notes, setNotes] = useState("");
   const [currentPrice, setCurrentPrice] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // const [currencySymbol, setCurrencySymbol] = useState("$");
 
-  // currency symbol - easy to change or replace later
   const currencySymbol = "$";
 
-  // 🧩 validation allowing default "Current price" (null) as valid
+  // ✅ Validation: allow positive (Buy) or negative (Sell), but not 0
   const isValid = (): boolean => {
-    // must have at least 1 share
-    if (shares <= 0) return false;
-
-    // purchasePrice can be undefined/null (means use current price)
-    if (purchasePrice !== null && purchasePrice !== undefined && purchasePrice < 0) return false;
-
-    // notes are always valid (optional)
+    if (shares === 0) return false;
+    if (purchasePrice !== null && purchasePrice < 0) return false;
     return true;
   };
 
@@ -47,13 +46,13 @@ const EditCompanyDialog: React.FC<EditCompanyDialogProps> = ({ symbol, onConfirm
   }, [symbol]);
 
   const handleConfirm = () => {
-    // Use explicit price if provided, otherwise use current price, otherwise send null
+    // Use explicit price if provided, otherwise fallback to current price
     const finalPrice =
       purchasePrice && purchasePrice > 0
         ? purchasePrice
         : currentPrice && currentPrice > 0
           ? currentPrice
-          : null; // 👈 null means "no price specified — backend should use current price"
+          : null;
 
     onConfirm({
       shares,
@@ -61,6 +60,11 @@ const EditCompanyDialog: React.FC<EditCompanyDialogProps> = ({ symbol, onConfirm
       notes,
     });
   };
+
+  // 💡 Determine action type & styles based on share value
+  const isSell = shares < 0;
+  const actionLabel = isSell ? "Sell" : "Buy";
+  const actionColor = isSell ? "#ef4444" : "#10b981"; // red or green
 
   return (
     <div
@@ -76,7 +80,7 @@ const EditCompanyDialog: React.FC<EditCompanyDialogProps> = ({ symbol, onConfirm
         alignItems: "center",
         justifyContent: "center",
       }}
-      onClick={onCancel} // click outside to cancel
+      onClick={onCancel}
     >
       <div
         style={{
@@ -88,17 +92,40 @@ const EditCompanyDialog: React.FC<EditCompanyDialogProps> = ({ symbol, onConfirm
           boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1)",
           position: "relative",
         }}
-        onClick={(e) => e.stopPropagation()} // prevent accidental close
+        onClick={(e) => e.stopPropagation()}
       >
+        {/* 🧠 Dialog Header with symbol + company name */}
         <h3
           style={{
-            margin: "0 0 12px 0",
+            margin: "0 0 4px 0",
             fontSize: "18px",
             fontWeight: 600,
           }}
         >
-          Add {symbol} to your portfolio
+          {actionLabel}{" "}
+          <span
+            style={{
+              fontWeight: 700,
+              color: isSell ? "#dc2626" : "#16a34a",
+              backgroundColor: isSell ? "rgba(239,68,68,0.1)" : "rgba(34,197,94,0.1)",
+              borderRadius: "6px",
+              padding: "2px 6px",
+            }}
+          >
+            {symbol}
+          </span>
         </h3>
+
+        {/* Secondary name line */}
+        <p
+          style={{
+            margin: "0 0 16px 0",
+            fontSize: "14px",
+            color: "#6b7280",
+          }}
+        >
+          {name}
+        </p>
 
         {loading && <p>Loading current price...</p>}
         {error && <p style={{ color: "red" }}>{error}</p>}
@@ -126,12 +153,9 @@ const EditCompanyDialog: React.FC<EditCompanyDialogProps> = ({ symbol, onConfirm
               <input
                 type="number"
                 value={shares}
-                onChange={(e) =>
-                  setShares(Math.max(0, Math.floor(parseFloat(e.target.value)) || 0))
-                }
-                min={0}
-                step={1} // ⬅️ erlaubt nur ganze Zahlen
-                placeholder="e.g. 10"
+                onChange={(e) => setShares(parseFloat(e.target.value) || 0)}
+                step={1}
+                placeholder="e.g. 10 or -5"
                 style={{
                   width: "100%",
                   padding: "8px",
@@ -140,11 +164,13 @@ const EditCompanyDialog: React.FC<EditCompanyDialogProps> = ({ symbol, onConfirm
                   fontSize: "14px",
                 }}
               />
+              <p style={{ fontSize: "12px", color: "#6b7280", marginTop: "4px" }}>
+                Positive = Buy, Negative = Sell
+              </p>
             </div>
 
             {/* Purchase Price input */}
             <div style={{ position: "relative", width: "100%", marginBottom: "12px" }}>
-              {/* currency symbol, dynamically set */}
               <span
                 style={{
                   position: "absolute",
@@ -163,7 +189,6 @@ const EditCompanyDialog: React.FC<EditCompanyDialogProps> = ({ symbol, onConfirm
                 value={purchasePrice ?? ""}
                 onChange={(e) => {
                   const value = parseFloat(e.target.value);
-                  // allow manual input but only positive numbers
                   if (isNaN(value) || value < 0) {
                     setPurchasePrice(0);
                   } else {
@@ -175,7 +200,7 @@ const EditCompanyDialog: React.FC<EditCompanyDialogProps> = ({ symbol, onConfirm
                 placeholder="Current price"
                 style={{
                   width: "100%",
-                  padding: "8px 8px 8px 22px", // padding for currency symbol
+                  padding: "8px 8px 8px 22px",
                   borderRadius: "8px",
                   border: "1px solid #d1d5db",
                   fontSize: "14px",
@@ -246,7 +271,7 @@ const EditCompanyDialog: React.FC<EditCompanyDialogProps> = ({ symbol, onConfirm
                 disabled={!isValid()}
                 style={{
                   padding: "8px 16px",
-                  backgroundColor: !isValid() ? "#9ca3af" : "#10b981",
+                  backgroundColor: !isValid() ? "#9ca3af" : actionColor,
                   color: "white",
                   border: "none",
                   borderRadius: "8px",
@@ -262,7 +287,7 @@ const EditCompanyDialog: React.FC<EditCompanyDialogProps> = ({ symbol, onConfirm
                   if (isValid()) e.currentTarget.style.opacity = "1";
                 }}
               >
-                Confirm
+                {actionLabel}
               </button>
             </div>
           </>

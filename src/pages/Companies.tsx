@@ -8,6 +8,8 @@ import CompanyDiscovery from "../components/CompanyDiscovery";
 import Notification from "../components/Notification";
 import ConfirmDialog from "../components/ConfirmDialog";
 import EditCompanyDialog from "../components/EditCompanyDialog";
+import InlineToast from "../components/InlineToast";
+
 //import { getCurrentPrice } from "../services/api/quotes";
 
 // English comment: add the small analytics panel component
@@ -193,6 +195,9 @@ export default function Companies() {
   const [batchBusy, setBatchBusy] = useState(false);
   const [query, setQuery] = useState<string>("");
   const [limit, setLimit] = useState<number>(25); // EN: adjustable server page size
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const [toastType, setToastType] = useState<"success" | "error">("success");
+
   const [sectorFilter, setSectorFilter] = useState<string>("All"); // EN: Sector filter (All = no filter)
 
   interface SelectedCompany {
@@ -1108,8 +1113,10 @@ export default function Companies() {
               const action = data.shares > 0 ? "Bought" : "Sold";
               const shareCount = Math.abs(data.shares);
               const priceText = result.price ? `$${result.price.toFixed(2)}` : "unknown price";
+              const message = `${action} ${shareCount} × ${buyDialogCompany.symbol} @ ${priceText}`;
 
-              alert(`${action} ${shareCount} ${buyDialogCompany} @ ${priceText}`);
+              setToastType("success");
+              setToastMsg(message);
 
               // Optionally trigger portfolio refresh
               // await loadPortfolio();
@@ -1125,6 +1132,9 @@ export default function Companies() {
             }
           }}
         />
+      )}
+      {toastMsg && (
+        <InlineToast message={toastMsg} type={toastType} onClose={() => setToastMsg(null)} />
       )}
     </div>
   );

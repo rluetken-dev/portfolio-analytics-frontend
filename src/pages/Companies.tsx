@@ -184,6 +184,7 @@ type CompanySummary = {
   symbol?: string;
   name?: string;
   sector?: string;
+  shares: number;
 };
 
 export default function Companies() {
@@ -203,6 +204,7 @@ export default function Companies() {
   interface SelectedCompany {
     symbol: string;
     name: string;
+    shares: number;
   }
 
   const [buyDialogCompany, setBuyDialogCompany] = useState<SelectedCompany | null>(null);
@@ -823,6 +825,7 @@ export default function Companies() {
                                 setBuyDialogCompany({
                                   symbol: sym,
                                   name: c.name && c.name.trim() ? c.name : sym, // fallback if name missing
+                                  shares: c.shares ?? 0,
                                 });
                               }}
                               onKeyDown={(e) => {
@@ -831,6 +834,7 @@ export default function Companies() {
                                   setBuyDialogCompany({
                                     symbol: sym,
                                     name: c.name && c.name.trim() ? c.name : sym, // fallback if name missing
+                                    shares: c.shares ?? 0,
                                   });
                                 }
                               }}
@@ -1075,6 +1079,7 @@ export default function Companies() {
         <EditCompanyDialog
           symbol={buyDialogCompany.symbol}
           name={buyDialogCompany.name}
+          currentShares={buyDialogCompany.shares ?? 0}
           onCancel={() => setBuyDialogCompany(null)}
           onConfirm={async (data) => {
             // 🧱 Define DTO for response typing

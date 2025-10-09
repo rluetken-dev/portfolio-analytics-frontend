@@ -4,17 +4,26 @@ import { getCurrentPrice } from "../services/api/quotes";
 interface EditCompanyDialogProps {
   symbol: string;
   name: string;
+  currentShares: number;
   onCancel: () => void;
   onConfirm: (data: { shares: number; purchasePrice: number | null; notes: string }) => void;
+}
+
+interface QuoteResponse {
+  status: number;
+  price: number | null;
+  error?: string;
 }
 
 const EditCompanyDialog: React.FC<EditCompanyDialogProps> = ({
   symbol,
   name,
+  currentShares,
   onConfirm,
   onCancel,
 }) => {
-  const [shares, setShares] = useState<number>(1);
+  //const [shares, setShares] = useState<number>(1);
+  const [shares, setShares] = useState<number | "">(1);
   const [purchasePrice, setPurchasePrice] = useState<number | null>(null);
   const [notes, setNotes] = useState("");
   const [currentPrice, setCurrentPrice] = useState<number | null>(null);
@@ -26,27 +35,54 @@ const EditCompanyDialog: React.FC<EditCompanyDialogProps> = ({
   // ✅ Validation: allow positive (Buy) or negative (Sell), but not 0
   const isValid = (): boolean => {
     if (shares === 0) return false;
-    if (purchasePrice !== null && purchasePrice < 0) return false;
+    if (purchasePrice === null || purchasePrice <= 0) return false;
     return true;
   };
 
-  // 🔹 Fetch current market price when dialog opens
+  // 🔹 Fetch current market price when dialog opens (graceful fallback)
   useEffect(() => {
-    const fetchPrice = async () => {
+    const fetchPrice = async (): Promise<void> => {
       setLoading(true);
-      const quote = await getCurrentPrice(symbol);
-      if (quote.status === 200 && quote.price !== null) {
-        setCurrentPrice(quote.price);
-      } else {
-        setError(quote.error ?? "Failed to fetch current price");
+      setError(null);
+      try {
+       
+        //########## Test ##########################################################################
+        // // ⚙️ TEMP: simulate API failure for testing fallback behavior
+        // if (true) {
+        //   // toggle to false to disable
+        //   console.warn("Simulating Alphavantage API failure...");
+        //   throw new Error("Simulated API limit reached");
+        // }
+        //##########################################################################################
+
+
+        const quote: QuoteResponse = await getCurrentPrice(symbol);
+
+        if (quote.status === 200 && quote.price !== null) {
+          setCurrentPrice(quote.price);
+          setPurchasePrice(quote.price);
+        } else {
+          console.warn("Price fetch failed:", quote.error);
+          setError("⚠️ Current price unavailable due to API limit. Please enter it manually.");
+          setCurrentPrice(null);
+        }
+      } catch (err) {
+        if (err instanceof Error) {
+          console.error("Unexpected price fetch error:", err.message);
+        } else {
+          console.error("Unexpected non-Error exception during price fetch:", err);
+        }
+        setError("⚠️ Current price unavailable due to API limit. Please enter it manually.");
+        setCurrentPrice(null);
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
     };
+
     fetchPrice();
   }, [symbol]);
 
-  const handleConfirm = () => {
-    // Use explicit price if provided, otherwise fallback to current price
+  const handleConfirm = (): void => {
     const finalPrice =
       purchasePrice && purchasePrice > 0
         ? purchasePrice
@@ -55,14 +91,13 @@ const EditCompanyDialog: React.FC<EditCompanyDialogProps> = ({
           : null;
 
     onConfirm({
-      shares,
+      shares: typeof shares === "number" ? shares : 0,
       purchasePrice: finalPrice,
       notes,
     });
   };
 
-  // 💡 Determine action type & styles based on share value
-  const isSell = shares < 0;
+  const isSell = typeof shares === "number" && shares < 0;
   const actionLabel = isSell ? "Sell" : "Buy";
   const actionColor = isSell ? "#ef4444" : "#10b981"; // red or green
 
@@ -94,7 +129,7 @@ const EditCompanyDialog: React.FC<EditCompanyDialogProps> = ({
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* 🧠 Dialog Header with symbol + company name */}
+        {/* 🧠 Header */}
         <h3
           style={{
             margin: "0 0 4px 0",
@@ -116,7 +151,6 @@ const EditCompanyDialog: React.FC<EditCompanyDialogProps> = ({
           </span>
         </h3>
 
-        {/* Secondary name line */}
         <p
           style={{
             margin: "0 0 16px 0",
@@ -128,13 +162,28 @@ const EditCompanyDialog: React.FC<EditCompanyDialogProps> = ({
         </p>
 
         {loading && <p>Loading current price...</p>}
-        {error && <p style={{ color: "red" }}>{error}</p>}
 
         {!loading && (
           <>
             {currentPrice && (
-              <p style={{ fontSize: "14px", color: "#4b5563", marginBottom: "16px" }}>
+              <p style={{ fontSize: "14px", color: "#4b5563", marginBottom: "8px" }}>
                 <strong>Current price:</strong> ${currentPrice.toFixed(2)}
+              </p>
+            )}
+
+            {/* ⚠️ Graceful API failure message */}
+            {error && (
+              <p
+                style={{
+                  color: "#c99000",
+                  fontSize: "13px",
+                  marginBottom: "8px",
+                  backgroundColor: "rgba(255, 235, 150, 0.2)",
+                  borderRadius: "6px",
+                  padding: "6px 8px",
+                }}
+              >
+                {error}
               </p>
             )}
 
@@ -153,7 +202,52 @@ const EditCompanyDialog: React.FC<EditCompanyDialogProps> = ({
               <input
                 type="number"
                 value={shares}
-                onChange={(e) => setShares(parseFloat(e.target.value) || 0)}
+                onChange={(e) => {
+                  const raw = e.target.value;
+
+                  // allow empty and "-" while typing
+                  if (raw === "" || raw === "-") {
+                    setShares(raw as "");
+                    return;
+                  }
+
+                  const value = Number(raw);
+                  if (Number.isNaN(value)) return;
+
+                  // ✅ handle zero gracefully for arrow-key transitions
+                  if (value === 0) {
+                    // determine previous direction and auto-snap
+                    setShares(typeof shares === "number" && shares < 0 ? 1 : -1);
+                    return;
+                  }
+
+                  // buying: positive, no limit
+                  if (value > 0) {
+                    setShares(value);
+                    return;
+                  }
+
+                  // selling: limit to -currentShares
+                  if (value < -currentShares) {
+                    setShares(-currentShares);
+                    return;
+                  }
+
+                  // no holdings, block negatives
+                  if (currentShares === 0 && value < 0) {
+                    return;
+                  }
+
+                  setShares(value);
+                }}
+                onBlur={() => {
+                  // normalize after leaving field
+                  if (typeof shares !== "number") {
+                    setShares(1); // default to 1 if invalid
+                  }
+                }}
+                min={-currentShares}
+                max={999999}
                 step={1}
                 placeholder="e.g. 10 or -5"
                 style={{
@@ -197,7 +291,7 @@ const EditCompanyDialog: React.FC<EditCompanyDialogProps> = ({
                 }}
                 min={0}
                 step={0.01}
-                placeholder="Current price"
+                placeholder="Enter price"
                 style={{
                   width: "100%",
                   padding: "8px 8px 8px 22px",
@@ -210,7 +304,7 @@ const EditCompanyDialog: React.FC<EditCompanyDialogProps> = ({
               />
             </div>
 
-            {/* Notes input */}
+            {/* Notes */}
             <div style={{ marginBottom: "16px" }}>
               <label
                 style={{
@@ -239,14 +333,7 @@ const EditCompanyDialog: React.FC<EditCompanyDialogProps> = ({
             </div>
 
             {/* Buttons */}
-            <div
-              style={{
-                display: "flex",
-                gap: "12px",
-                justifyContent: "flex-end",
-              }}
-            >
-              {/* Cancel */}
+            <div style={{ display: "flex", gap: "12px", justifyContent: "flex-end" }}>
               <button
                 onClick={onCancel}
                 style={{
@@ -265,7 +352,6 @@ const EditCompanyDialog: React.FC<EditCompanyDialogProps> = ({
                 Cancel
               </button>
 
-              {/* Confirm */}
               <button
                 onClick={handleConfirm}
                 disabled={!isValid()}

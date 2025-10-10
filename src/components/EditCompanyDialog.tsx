@@ -45,7 +45,6 @@ const EditCompanyDialog: React.FC<EditCompanyDialogProps> = ({
       setLoading(true);
       setError(null);
       try {
-       
         //########## Test ##########################################################################
         // // ⚙️ TEMP: simulate API failure for testing fallback behavior
         // if (true) {
@@ -54,7 +53,6 @@ const EditCompanyDialog: React.FC<EditCompanyDialogProps> = ({
         //   throw new Error("Simulated API limit reached");
         // }
         //##########################################################################################
-
 
         const quote: QuoteResponse = await getCurrentPrice(symbol);
 

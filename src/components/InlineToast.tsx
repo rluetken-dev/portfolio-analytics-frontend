@@ -2,7 +2,7 @@ import React, { useEffect } from "react";
 
 export interface InlineToastProps {
   message: string;
-  type?: "success" | "error";
+  type?: "success" | "error" | "info";
   durationMs?: number;
   onClose?: () => void;
 }

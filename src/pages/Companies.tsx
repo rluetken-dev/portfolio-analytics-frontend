@@ -193,11 +193,10 @@ export default function Companies() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState<Record<string, boolean>>({});
-  const [batchBusy, setBatchBusy] = useState(false);
   const [query, setQuery] = useState<string>("");
   const [limit, setLimit] = useState<number>(25); // EN: adjustable server page size
   const [toastMsg, setToastMsg] = useState<string | null>(null);
-  const [toastType, setToastType] = useState<"success" | "error">("success");
+  const [toastType, setToastType] = useState<"success" | "error" | "info">("success");
 
   const [sectorFilter, setSectorFilter] = useState<string>("All"); // EN: Sector filter (All = no filter)
 
@@ -248,18 +247,17 @@ export default function Companies() {
       setLoading(true);
       setError(null);
       try {
-        const raw = opts?.q?.trim() ?? "";
-        const lim = opts?.limit ?? limit; // EN: default to current state
+        const raw = opts?.q?.trim() ?? query.trim(); // ✅ fallback to current query
+        const lim = opts?.limit ?? limit;
+
         const params = new URLSearchParams();
         if (raw) params.set("q", raw);
         if (lim) params.set("limit", String(lim));
 
-        /** Unified companies endpoint for current user (Admin included for now) */
         const basePath = "/api/UserCompany";
         const path = params.toString() ? `${basePath}?${params.toString()}` : basePath;
 
         const data = await fetchJson<CompanySummary[]>({ path });
-
         setItems(Array.isArray(data) ? data : []);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -268,8 +266,101 @@ export default function Companies() {
         setLoading(false);
       }
     },
-    [limit],
+    [limit, query], // ✅ query added
   );
+
+  // English: Refresh all missing company profiles (server-driven batch, polite pacing)
+  const refreshAllProfiles = useCallback(async () => {
+    try {
+      const batchSize = 10; // small polite batch to avoid API overload
+      let rounds = 0;
+      let totalUpdated = 0;
+      let lastRemaining = 0;
+
+      while (rounds < 50) {
+        const res = await fetchJson<{ count: number; remaining?: number }>({
+          path: `/api/companies/refresh-profiles?limit=${batchSize}`,
+          method: "POST",
+          timeoutMs: 45_000,
+        });
+
+        const updatedNow = res?.count ?? 0;
+        totalUpdated += updatedNow;
+        lastRemaining = res?.remaining ?? 0;
+
+        console.log(
+          `[refreshAllProfiles] round ${rounds + 1}: updated=${updatedNow}, remaining=${lastRemaining}`,
+        );
+
+        if (updatedNow === 0) break; // nothing more to refresh
+
+        rounds += 1;
+        await new Promise((r) => setTimeout(r, 250)); // polite delay between batches
+      }
+
+      await load({ q: query }); // reload current list after refresh
+
+      console.log(
+        `[refreshAllProfiles] finished: totalUpdated=${totalUpdated}, remaining=${lastRemaining}`,
+      );
+
+      // return these values for autoRefreshProfiles (future step)
+      return { totalUpdated, lastRemaining };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`Batch refresh failed: ${msg}`);
+      return { totalUpdated: 0, lastRemaining: 0 };
+    }
+  }, [load, query]);
+
+  // Automatically detect missing company metadata and trigger a background refresh
+  const autoRefreshProfiles = useCallback(async () => {
+    try {
+      if (query.trim().length > 0) return; // don't auto-refresh during active search
+
+      // English: Find companies without name or sector
+      const missing = items.filter((c) => !c.name?.trim() || !c.sector?.trim());
+
+      if (missing.length === 0) return; // nothing to update
+
+      // English: Notify user that background update starts
+      setToastType("info");
+      setToastMsg(`Updating ${missing.length} company profiles...`);
+
+      // English: Trigger background batch refresh
+      const { totalUpdated, lastRemaining } = (await refreshAllProfiles()) ?? {
+        totalUpdated: 0,
+        lastRemaining: 0,
+      };
+
+      // 🧠 Ensure backend updates are committed before reload (small delay)
+      await new Promise((r) => setTimeout(r, 400));
+
+      // English: Now reload list with fresh data
+      await load({ q: query || undefined });
+
+      // English: Decide final message based on remaining count
+      if (lastRemaining > 0) {
+        // ⚠️ Inform user that API limit was reached
+        setToastType("info");
+        setToastMsg(
+          `Updated ${totalUpdated} company profiles, but ${lastRemaining} could not be refreshed due to API limits. Please try again later.`,
+        );
+      } else if (totalUpdated > 0) {
+        // ✅ Normal success case
+        setToastType("success");
+        setToastMsg(`Updated ${totalUpdated} company profiles successfully ✅`);
+      } else {
+        // ℹ️ Nothing needed update
+        setToastType("info");
+        setToastMsg("All company profiles are already up to date.");
+      }
+    } catch (err) {
+      console.error("Auto refresh failed:", err);
+      setToastType("error");
+      setToastMsg("Profile auto-update failed.");
+    }
+  }, [items, load, query, refreshAllProfiles]);
 
   const showNotification = useCallback((message: string, type: "success" | "error" | "info") => {
     setNotification({ message, type });
@@ -288,12 +379,24 @@ export default function Companies() {
     void load();
   }, [load]);
 
+  // After initial load, check if some profiles need auto-refresh
+  useEffect(() => {
+    // Run auto refresh only once after initial successful load
+    if (!loading && items.length > 0) {
+      const alreadyChecked = sessionStorage.getItem("autoRefreshDone");
+      if (!alreadyChecked) {
+        sessionStorage.setItem("autoRefreshDone", "1");
+        void autoRefreshProfiles();
+      }
+    }
+  }, [loading, items, autoRefreshProfiles]);
+
   /** EN: Debounced search-as-you-type (skip initial render). */
   const firstRun = useRef(true);
   useEffect(() => {
     if (firstRun.current) {
       firstRun.current = false;
-      return; // EN: initial load already happened above
+      return; // skip initial run
     }
     const handle = setTimeout(() => {
       void load({ q: query }); // EN: load reads current limit internally
@@ -358,38 +461,6 @@ export default function Companies() {
       alert(`Failed to refresh ${symbol}: ${msg}`);
     } finally {
       setRefreshing((m) => ({ ...m, [symbol]: false }));
-    }
-  };
-
-  /** Batch: refresh multiple profiles (server decides which; limit is a hint). */
-  const refreshAllProfiles = async () => {
-    setBatchBusy(true);
-    try {
-      const batchSize = 10; // EN: small batch to avoid timeouts
-      let rounds = 0;
-
-      // EN: keep calling until server returns count = 0 (with a safety cap)
-      while (rounds < 50) {
-        const res = await fetchJson<{ count: number }>({
-          path: `/api/companies/refresh-profiles?limit=${batchSize}`,
-          method: "POST",
-          timeoutMs: 45_000,
-        });
-
-        if (!res?.count || res.count === 0) break;
-        rounds += 1;
-
-        // EN: short pause to be polite to the upstream API
-        await new Promise((r) => setTimeout(r, 250));
-      }
-
-      // EN: reload current list (keeps active filter/query/limit)
-      await load({ q: query });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      alert(`Batch refresh failed: ${msg}`);
-    } finally {
-      setBatchBusy(false);
     }
   };
 
@@ -637,34 +708,6 @@ export default function Companies() {
               ))}
             </select>
           </div>
-
-          <button
-            onClick={() => void load({ q: query })}
-            disabled={batchBusy}
-            style={{
-              ...styles.control,
-              ...styles.btn,
-              ...(batchBusy ? styles.btnDisabled : {}),
-              ...styles.btnSoft,
-            }}
-            title="Reload list from server"
-          >
-            Reload list
-          </button>
-
-          <button
-            onClick={refreshAllProfiles}
-            disabled={batchBusy}
-            style={{
-              ...styles.control,
-              ...styles.btn,
-              ...(batchBusy ? styles.btnDisabled : {}),
-              ...styles.btnSoft,
-            }}
-            title="Fetch Name & Sector for missing entries (server-driven batch)"
-          >
-            {batchBusy ? "Refreshing all…" : "Refresh all profiles"}
-          </button>
         </div>
       </div>
 

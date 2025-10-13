@@ -1,15 +1,10 @@
 // src/components/AnalyticsMiniPanel.tsx
 import { useCallback, useMemo, useState, useEffect, useRef } from "react";
 import { getLatestCloseFromQuotes } from "../services/api/quotes";
-import { refreshQuotes } from "../services/api/quotes";
 import { fetchFundamentalsSnapshot, type SnapshotResult } from "../services/api/fundamentals";
-import { refreshFundamentals } from "../services/api/fundamentals";
-import { toApiMessage } from "../utils/statusMessages";
-import { toErrorPillMessage } from "../utils/statusMessages";
 import { fetchLatestDateISO } from "../utils/dateUtils";
-
-// English: live price (non-persistent) fetcher
-import { getCurrentPrice, type CurrentQuote } from "../services/api/quotes";
+import { fetchJson } from "../services/api/client";
+import type { CurrentQuote } from "../services/api/quotes";
 
 /**
  * Very small self-contained panel to show two metrics for a symbol:
@@ -192,31 +187,6 @@ const makeRowGrid = (cols: number): React.CSSProperties => ({
   gap: 6,
 });
 
-// Tiny inline status pill (reusable)
-function StatusPill({
-  kind,
-  children,
-}: {
-  kind: "ok" | "err" | "info";
-  children: React.ReactNode;
-}) {
-  // English: minimal visual feedback capsule
-  const base: React.CSSProperties = {
-    fontSize: 12,
-    padding: "2px 8px",
-    borderRadius: 999,
-    border: "1px solid",
-    display: "inline-block",
-  };
-  const theme =
-    kind === "ok"
-      ? { borderColor: "#cce5cc", background: "#f6fff6" }
-      : kind === "err"
-        ? { borderColor: "#f5c2c7", background: "#fff6f6" }
-        : { borderColor: "#ddd", background: "#f7f7f7" };
-  return <span style={{ ...base, ...theme }}>{children}</span>;
-}
-
 // English: optional initial symbol + notify parent when active symbol changes
 export default function AnalyticsMiniPanel({
   initialSymbol,
@@ -240,19 +210,8 @@ export default function AnalyticsMiniPanel({
   const [live, setLive] = useState<CurrentQuote | null>(null); // English: latest live quote payload
   const [baseClose, setBaseClose] = useState<number | null>(null); // English: last cached close for delta badge
 
-  // --- Per-action busy flags (disable individual buttons) ---
-  const [priceBusy, setPriceBusy] = useState(false); // English: "Get price data" request in flight
-  const [liveBusy, setLiveBusy] = useState(false); // English: "Get live price" request in flight
-  const [fundBusy, setFundBusy] = useState(false); // English: fundamentals fetch/save in flight
-
   // --- Fundamentals raw snapshot (debug/preview; not persisted) ---
   const [fundRes, setFundRes] = useState<SnapshotResult | null>(null); // English: result of snapshot call
-
-  // --- Persistent status text per action (left of each button) ---
-  const [priceFetchStatus, setPriceFetchStatus] = useState<string | null>(null); // English: Get price data
-  const [liveStatus, setLiveStatus] = useState<string | null>(null); // English: Get live price
-  const [fundSnapStatus, setFundSnapStatus] = useState<string | null>(null); // English: Get fundamentals (snapshot)
-  const [fundSaveStatus, setFundSaveStatus] = useState<string | null>(null); // English: Save fundamentals (refresh)
 
   // --- Transient error pills per action (auto-hidden after 5s) ---
   const [priceFetchErr, setPriceFetchErr] = useState<string | null>(null); // English: Get price data error
@@ -287,6 +246,9 @@ export default function AnalyticsMiniPanel({
 
   const lastInitialSymRef = useRef<string | null>(null); // English: remember last adopted initialSymbol to avoid duplicates
 
+  // --- Auto-refresh status indicator ---
+  const [autoStatus, setAutoStatus] = useState<string | null>(null); // English: small status line shown during freshness check
+
   // English: persist pinned list on change
   useEffect(() => {
     try {
@@ -306,7 +268,7 @@ export default function AnalyticsMiniPanel({
   );
 
   // Centralized backend base (adjust if your backend port changes)
-  const backendBase = useMemo(() => "http://localhost:5046", []);
+  const backendBase = useMemo(() => "", []);
 
   // English: always resolve user input (name or symbol-ish) to a TICKER via backend search
   const resolveToTicker = useCallback(
@@ -315,10 +277,9 @@ export default function AnalyticsMiniPanel({
       if (!q) return null;
 
       try {
-        const resp = await fetch(
-          `${backendBase}/api/companies?q=${encodeURIComponent(q)}&limit=1`,
-          { headers: { Accept: "application/json" } },
-        );
+        const resp = await fetch(`/api/companies?q=${encodeURIComponent(q)}&limit=1`, {
+          headers: { Accept: "application/json" },
+        });
         if (!resp.ok) return null;
 
         const arr = (await resp.json()) as Array<{ symbol?: string }>;
@@ -352,31 +313,14 @@ export default function AnalyticsMiniPanel({
     return () => clearTimeout(t);
   }, [liveErr, fundSnapErr, fundErr, priceFetchErr]);
 
-  // English: does the CTA apply? (only when no local price present)
-  const needsPriceCta = useMemo(() => {
-    return sections.some(
-      (sec) =>
-        sec.title === "Valuation" &&
-        sec.items.some((i) => i.label === "Price" && i.value === "n/a"),
-    );
-  }, [sections]);
-
   // English: clear per-action status/errors/busy flags when switching company
   const resetActionUi = useCallback((): void => {
-    // status lines
-    setPriceFetchStatus(null);
-    setLiveStatus(null);
-    setFundSnapStatus(null);
-    setFundSaveStatus(null);
     // error pills
     setPriceFetchErr(null);
     setLiveErr(null);
     setFundSnapErr(null);
     setFundErr(null);
-    // busy flags
-    setPriceBusy(false);
-    setLiveBusy(false);
-    setFundBusy(false);
+
     // snapshot/debug + live baseline
     setFundRes(null);
     setLive(null);
@@ -403,10 +347,6 @@ export default function AnalyticsMiniPanel({
     // optional: focus back to input for quick typing
     searchRef.current?.focus();
   }, [resetActionUi, onSymbolChange]);
-
-  // English: show fundamentals CTAs only when many metrics are missing
-  const manyNa =
-    sections.reduce((sum, sec) => sum + sec.items.filter((i) => i.value === "n/a").length, 0) >= 6;
 
   // --- Main load routine (your existing body kept intact) ---
   const load = useCallback(
@@ -822,42 +762,97 @@ export default function AnalyticsMiniPanel({
 
       try {
         // Ask backend for up to 2 hits; only accept when we get exactly 1
-        const resp = await fetch(
-          `${backendBase}/api/companies?q=${encodeURIComponent(q)}&limit=2`,
-          { headers: { Accept: "application/json" } },
-        );
+        const resp = await fetch(`/api/companies?q=${encodeURIComponent(q)}&limit=2`, {
+          headers: { Accept: "application/json" },
+        });
         if (!resp.ok) return null;
 
         const arr = (await resp.json()) as Array<{ symbol?: string }>;
+
+        console.log("[resolveUniqueTicker] API result:", arr);
+
         if (!Array.isArray(arr)) return null;
 
-        if (arr.length === 1 && arr[0]?.symbol) {
-          return String(arr[0].symbol).toUpperCase();
+        if (arr.length >= 1 && arr[0]?.symbol) {
+          return String(arr[0].symbol).toUpperCase(); // allow first match instead of strict unique
         }
-        return null; // ambiguous or not found
+        return null;
       } catch {
+        console.error("[resolveUniqueTicker] ERROR:", err);
         return null; // best-effort
       }
     },
     [backendBase],
   );
 
-  // English: try to resolve input to a unique ticker; load it, or clear selection if ambiguous
   const handleResolveAndLoad = useCallback(async (): Promise<void> => {
+    console.log("[handleResolveAndLoad] symbol =", symbol);
+    console.log("[handleResolveAndLoad] typeof resolveUniqueTicker =", typeof resolveUniqueTicker);
+
+    try {
+      const testResp = await fetch("/api/companies?q=AAPL&limit=1");
+      console.log("[handleResolveAndLoad] manual fetch ok?", testResp.ok, testResp.status);
+    } catch (err) {
+      console.error("[handleResolveAndLoad] manual fetch failed:", err);
+    }
+
     const sym = await resolveUniqueTicker(symbol);
+
+    // Check recency of price data (from backend)
+    try {
+      const resp = await fetch(`/api/quotes/latest?symbol=${sym}`);
+      if (resp.ok) {
+        const data = await resp.json();
+
+        // ✅ handle array response (from /api/quotes/latest)
+        const latestEntry = Array.isArray(data) && data.length > 0 ? data[0] : null;
+        const lastUpdate = latestEntry?.date ? new Date(latestEntry.date) : null;
+
+        const tooOld = !lastUpdate || Date.now() - lastUpdate.getTime() > 1000 * 60 * 60 * 24; // older than 24h
+
+        if (tooOld) {
+          console.warn(
+            `[AnalyticsMiniPanel] ${sym}: price data outdated (last update: ${latestEntry?.date})`,
+          );
+          setAutoStatus(`⚠️ Price data outdated (last: ${latestEntry?.date}) → refreshing...`);
+
+          try {
+            // 🔄 Trigger refresh for this single symbol
+            const refreshResp = await fetchJson({
+              path: `/api/quotes/refresh?symbols=${sym}&range=30d`,
+              method: "POST",
+              timeoutMs: 45_000,
+            });
+
+            console.log(`[AnalyticsMiniPanel] ${sym}: refresh successful`, refreshResp);
+            setAutoStatus(`✅ Price data refreshed successfully`);
+
+            // 🟢 optional but recommended: reload the panel right away
+            await load(sym!);
+          } catch (err) {
+            console.error(`[AnalyticsMiniPanel] ${sym}: refresh failed`, err);
+            setAutoStatus(`⚠️ Could not refresh (API limit reached or network issue)`);
+          }
+        } else {
+          console.log(`[AnalyticsMiniPanel] ${sym}: price data fresh (as of ${latestEntry?.date})`);
+          setAutoStatus(`✅ Price data up to date (${latestEntry?.date})`);
+        }
+      }
+    } catch (err) {
+      console.error("Failed to check price recency:", err);
+    }
+
     if (sym) {
-      setSymbol(sym); // show resolved ticker in the input
-      resetActionUi(); // clear previous per-action UI
-      //onSymbolChange?.(sym); // reflect selection in parent (highlight/scroll)
-      typingRef.current = false; // English: explicit submit -> allow loading now
-      await load(sym); // load analytics for the resolved ticker
+      setSymbol(sym);
+      resetActionUi();
+      typingRef.current = false;
+      await load(sym);
       setConfirmedSym(sym);
     } else {
-      // No unique match: act as if nothing is selected
       resetActionUi();
       setSections([]);
       setSpark([]);
-      onSymbolChange?.(""); // tell parent to clear selection (hides panel highlight)
+      onSymbolChange?.("");
     }
   }, [
     symbol,
@@ -869,6 +864,138 @@ export default function AnalyticsMiniPanel({
     setSpark,
     setSymbol,
   ]);
+
+  // 🧩 Improved auto-refresh + auto-reload behavior
+  const checkDataFreshness = useCallback(
+    async (sym: string) => {
+      if (!sym) return;
+
+      let priceMsg = "⚙️ Checking price data...";
+      let fundMsg = "⚙️ Checking fundamentals...";
+      let priceRefreshed = false;
+      let fundamentalsRefreshed = false;
+
+      // --- 1️⃣ Price freshness check ---
+      try {
+        const resp = await fetch(`/api/quotes/latest?symbol=${sym}`);
+
+        // detect network-level failure (CORS / ECONNREFUSED)
+        if (!resp || resp.type === "opaque") {
+          throw new Error("Fetch unreachable or CORS blocked");
+        }
+
+        if (resp.status === 404) {
+          priceMsg = "🆕 No local data → fetching...";
+          const refreshResp = await fetchJson({
+            path: `/api/quotes/refresh?symbols=${sym}&range=30d`,
+            method: "POST",
+            timeoutMs: 45_000,
+          });
+          console.log(`[AnalyticsMiniPanel] ${sym}: initial price data fetched`, refreshResp);
+          priceMsg = "✅ Price data fetched successfully";
+          priceRefreshed = true;
+        } else if (resp.ok) {
+          const data = await resp.json();
+          const latestEntry = Array.isArray(data) && data.length > 0 ? data[0] : null;
+          const lastUpdate = latestEntry?.date ? new Date(latestEntry.date) : null;
+          const tooOld = !lastUpdate || Date.now() - lastUpdate.getTime() > 1000 * 60 * 60 * 24;
+
+          if (tooOld) {
+            priceMsg = `⚠️ Price data outdated (last: ${latestEntry?.date}) → refreshing...`;
+            try {
+              const refreshResp = await fetchJson({
+                path: `/api/quotes/refresh?symbols=${sym}&range=30d`,
+                method: "POST",
+                timeoutMs: 45_000,
+              });
+              console.log(`[AnalyticsMiniPanel] ${sym}: price refresh successful`, refreshResp);
+              priceMsg = "✅ Price data refreshed successfully";
+              priceRefreshed = true;
+            } catch (err) {
+              console.error(`[AnalyticsMiniPanel] ${sym}: price refresh failed`, err);
+              priceMsg = "⚠️ Could not refresh price data (API limit or network issue)";
+            }
+          } else {
+            priceMsg = `✅ Price data up to date (${latestEntry?.date})`;
+          }
+        } else {
+          priceMsg = `⚠️ Could not check price freshness (HTTP ${resp.status})`;
+        }
+      } catch (err) {
+        console.error("[auto-refresh] price check failed:", err);
+        priceMsg = "⚠️ Quotes API not reachable (CORS or backend down)";
+      }
+
+      // --- 2️⃣ Fundamentals freshness check ---
+      try {
+        const fundResp = await fetch(`/api/fundamentals/refresh?symbol=${sym}`, {
+          method: "POST",
+          headers: { Accept: "application/json" },
+        });
+
+        if (fundResp.ok) {
+          const fundData = await fundResp.json();
+          const totalInserted =
+            (fundData?.inserted?.income ?? 0) +
+            (fundData?.inserted?.balance ?? 0) +
+            (fundData?.inserted?.cash ?? 0);
+
+          if (totalInserted > 0) {
+            fundMsg = "✅ Fundamentals updated successfully";
+            fundamentalsRefreshed = true;
+          } else {
+            // 🧠 double-check via latest endpoint
+            const latestFundResp = await fetch(`/api/fundamentals/latest?symbol=${sym}`);
+            if (latestFundResp.ok) {
+              const latestFundData = await latestFundResp.json();
+              if (!latestFundData || Object.keys(latestFundData).length === 0) {
+                fundMsg = "⚠️ No fundamentals data found — analytics may be empty";
+              } else {
+                fundMsg = "✅ Fundamentals already up to date";
+              }
+            } else {
+              fundMsg = "⚠️ Could not verify fundamentals presence";
+            }
+          }
+        } else if (fundResp.status === 429) {
+          fundMsg = "⚠️ Fundamentals refresh skipped (API limit reached)";
+        } else if (fundResp.status === 404) {
+          fundMsg = "🆕 No fundamentals in DB yet → fetching...";
+          fundamentalsRefreshed = true;
+        } else {
+          fundMsg = `⚠️ Could not refresh fundamentals (HTTP ${fundResp.status})`;
+        }
+      } catch (err) {
+        console.error("[auto-refresh] fundamentals check failed:", err);
+        fundMsg = "⚠️ Fundamentals API not reachable (CORS or backend down)";
+      }
+
+      // ✅ Display final message
+      setAutoStatus(`${priceMsg}\n${fundMsg}`);
+
+      // --- 3️⃣ Auto reload if refreshed ---
+      if (priceRefreshed || fundamentalsRefreshed) {
+        setAutoStatus((prev) => `${prev}\n♻️ Refresh complete — updating analytics...`);
+
+        try {
+          await load(sym);
+          const hasData = sections.some((sec) =>
+            sec.items.some((i) => i.value && i.value !== "n/a" && i.label !== "Price"),
+          );
+
+          if (!hasData) {
+            setAutoStatus(
+              (prev) => `${prev}\nℹ️ Analytics data not yet available — please try again later`,
+            );
+          }
+        } catch (err) {
+          console.error("[auto-refresh] reload failed:", err);
+          setAutoStatus((prev) => `${prev}\n⚠️ Reload failed — please retry manually`);
+        }
+      }
+    },
+    [load, sections],
+  );
 
   useEffect(() => {
     typingRef.current = true; // block any auto-load until user confirms
@@ -892,6 +1019,15 @@ export default function AnalyticsMiniPanel({
   useEffect(() => {
     confirmedRef.current = confirmedSym; // English: keep ref in sync with state
   }, [confirmedSym]);
+
+  // English: run auto-refresh check whenever a new symbol is confirmed (panel opened)
+  useEffect(() => {
+    if (!confirmedSym) return; // no active panel
+    checkDataFreshness(confirmedSym).catch((err) => {
+      console.warn("[auto-refresh] check failed:", err);
+      setAutoStatus("⚠️ Auto-refresh check failed");
+    });
+  }, [confirmedSym, checkDataFreshness]);
 
   return (
     <div
@@ -1049,252 +1185,18 @@ export default function AnalyticsMiniPanel({
         </button>
       </div>
 
-      {/* English: Get price data button */}
-      {(needsPriceCta || priceBusy || priceFetchStatus || priceFetchErr) && (
-        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-          {needsPriceCta && (
-            <button
-              onClick={async () => {
-                try {
-                  setPriceBusy(true); // English: local busy state
-                  setErr(null);
-                  setPriceFetchErr(null);
-                  setPriceFetchStatus(null);
-
-                  // English: trigger backend refresh (fetch & persist)
-                  await refreshQuotes(currentSym, "24m");
-
-                  // English: verify persistence by asking cache directly
-                  const after = await getLatestCloseFromQuotes(currentSym);
-
-                  // ✅ unified status line
-                  const statusMsg = toApiMessage(currentSym, after.status ?? 500, after.error);
-                  setPriceFetchStatus(statusMsg);
-
-                  // ✅ error pill (only on error)
-                  if (after.status !== 200 || typeof after.value !== "number") {
-                    const pillMsg = toErrorPillMessage(
-                      after.status ?? 500,
-                      after.error,
-                      after.retryAfterSec,
-                    );
-                    setPriceFetchErr(pillMsg);
-                  } else {
-                    // optionally reload panel if success
-                    await load();
-                  }
-                } catch (e) {
-                  const statusMsg = toApiMessage(currentSym, 500, String(e));
-                  setPriceFetchStatus(statusMsg);
-                  setPriceFetchErr("Server error");
-                } finally {
-                  setPriceBusy(false);
-                }
-              }}
-              disabled={priceBusy}
-              style={{
-                padding: "6px 10px",
-                borderRadius: 8,
-                border: "1px solid #333",
-                background: "transparent",
-                cursor: priceBusy ? "default" : "pointer",
-                fontSize: 12,
-                opacity: priceBusy ? 0.7 : 1,
-              }}
-              title={`Fetch and store recent price data for ${currentSym}`}
-            >
-              {priceBusy ? "Loading…" : "Get price data"}
-            </button>
-          )}
-
-          {/* English: persistent status (left) + transient error pill (right) */}
-          {priceFetchStatus && (
-            <span style={{ fontSize: 12, opacity: 0.7 }}>{priceFetchStatus}</span>
-          )}
-          {priceFetchErr && <StatusPill kind="err">{priceFetchErr}</StatusPill>}
-        </div>
-      )}
-
-      {/* English: Get live price button */}
-      {sections.length > 0 && (
-        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-          <button
-            onClick={async () => {
-              try {
-                setLiveBusy(true); // English: start local busy (no global loading)
-                setErr(null);
-                setLiveErr(null);
-                setLiveStatus(null);
-
-                const startSym = currentSym; // English: capture symbol at click time
-                const q = await getCurrentPrice(startSym);
-
-                // ✅ store live price so the Price row can compute the delta
-                if (startSym === currentSym) {
-                  setLive(q);
-                }
-
-                // ✅ status line (always shown, long message)
-                const statusMsg = toApiMessage(q.symbol ?? startSym, q.status, q.error);
-                setLiveStatus(statusMsg);
-
-                // ✅ error pill (short message, only on error)
-                if (q.status !== 200) {
-                  const pillMsg = toErrorPillMessage(q.status, q.error, q.retryAfterSec);
-                  setLiveErr(pillMsg);
-                }
-              } catch (e) {
-                const statusMsg = toApiMessage(currentSym, 500, String(e));
-                setLiveStatus(statusMsg);
-                setLiveErr("Server error"); // short pill message
-              } finally {
-                setLiveBusy(false);
-              }
-            }}
-            disabled={loading || liveBusy}
-            style={{
-              padding: "6px 10px",
-              borderRadius: 8,
-              border: "1px solid #333",
-              background: "transparent",
-              cursor: loading || liveBusy ? "default" : "pointer",
-              fontSize: 12,
-              opacity: loading || liveBusy ? 0.7 : 1,
-            }}
-            title={`Fetch live price for ${currentSym}`}
-          >
-            {liveBusy ? "Fetching…" : "Get live price"}
-          </button>
-
-          {/* English: persistent status line + optional error pill */}
-          {liveStatus && <span style={{ fontSize: 12, opacity: 0.7 }}>{liveStatus}</span>}
-          {liveErr && <StatusPill kind="err">{liveErr}</StatusPill>}
-        </div>
-      )}
-
-      {/* English: Get fundamentals button */}
-      {(manyNa || fundSnapErr || fundSnapStatus) && (
-        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-          {manyNa && (
-            <button
-              onClick={async () => {
-                try {
-                  setFundBusy(true);
-                  setErr(null);
-                  setFundSnapErr(null);
-                  setFundSnapStatus(null);
-                  setFundRes(null);
-
-                  const res = await fetchFundamentalsSnapshot(currentSym, "annual", 5);
-                  setFundRes(res);
-
-                  // ✅ status line (always shown, long message)
-                  const statusMsg = toApiMessage(currentSym, res.status);
-                  setFundSnapStatus(statusMsg);
-
-                  // ✅ error pill (short message, only on error)
-                  if (res.status !== 200) {
-                    const pillMsg = toErrorPillMessage(res.status);
-                    setFundSnapErr(pillMsg);
-                  }
-                } catch (e) {
-                  const statusMsg = toApiMessage(currentSym, 500, String(e));
-                  setFundSnapStatus(statusMsg);
-                  setFundSnapErr("Server error"); // short pill message
-                } finally {
-                  setFundBusy(false);
-                }
-              }}
-              disabled={loading || fundBusy}
-              style={{
-                padding: "6px 10px",
-                borderRadius: 8,
-                border: "1px solid #333",
-                background: "transparent",
-                cursor: loading || fundBusy ? "default" : "pointer",
-                fontSize: 12,
-                opacity: loading || fundBusy ? 0.7 : 1,
-              }}
-              title={`Fetch fundamentals snapshot (not persisted) for ${currentSym}`}
-            >
-              {fundBusy ? "Fetching…" : "Get fundamentals (5y)"}
-            </button>
-          )}
-
-          {/* English: persistent status line + optional error pill */}
-          {fundSnapStatus && <span style={{ fontSize: 12, opacity: 0.7 }}>{fundSnapStatus}</span>}
-          {fundSnapErr && <StatusPill kind="err">{fundSnapErr}</StatusPill>}
-        </div>
-      )}
-
-      {/* English: Save fundamentals button */}
-      {(manyNa || fundErr || fundSaveStatus) && (
-        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-          {manyNa && (
-            <button
-              onClick={async () => {
-                try {
-                  setFundBusy(true);
-                  setErr(null);
-                  setFundErr(null);
-                  setFundSaveStatus(null);
-
-                  const res = await refreshFundamentals(currentSym, "annual", 5);
-
-                  // ✅ build custom success message
-                  const allZero =
-                    (res.inserted?.income ?? 0) === 0 &&
-                    (res.inserted?.balance ?? 0) === 0 &&
-                    (res.inserted?.cash ?? 0) === 0 &&
-                    (res.skipped?.income ?? 0) === 0 &&
-                    (res.skipped?.balance ?? 0) === 0 &&
-                    (res.skipped?.cash ?? 0) === 0;
-
-                  const statusMsg = allZero
-                    ? `✔️ Save fundamentals (${res.symbol}): no changes (up-to-date or free tier).`
-                    : `✔️ Save fundamentals (${res.symbol}): income +${res.inserted?.income ?? 0}/${res.skipped?.income ?? 0}, ` +
-                      `balance +${res.inserted?.balance ?? 0}/${res.skipped?.balance ?? 0}, ` +
-                      `cash +${res.inserted?.cash ?? 0}/${res.skipped?.cash ?? 0}`;
-
-                  setFundSaveStatus(statusMsg);
-
-                  // ✅ reload so analytics can pick up newly persisted data
-                  await load();
-                } catch (e) {
-                  // English: normalize error and map once via shared helpers
-                  const errMsg = e instanceof Error ? e.message : String(e);
-
-                  const statusMsg = toApiMessage(currentSym, 500, errMsg);
-                  setFundSaveStatus(statusMsg);
-
-                  const pillMsg = toErrorPillMessage(500, errMsg);
-                  setFundErr(pillMsg);
-
-                  console.warn("[panel] fundamentals refresh failed:", e);
-                } finally {
-                  // English: always release busy flag so buttons re-enable
-                  setFundBusy(false);
-                }
-              }}
-              disabled={loading || fundBusy}
-              style={{
-                padding: "6px 10px",
-                borderRadius: 8,
-                border: "1px solid #333",
-                background: "transparent",
-                cursor: loading || fundBusy ? "default" : "pointer",
-                fontSize: 12,
-                opacity: loading || fundBusy ? 0.7 : 1,
-              }}
-              title={`Persist fundamentals (annual, 5y) for ${currentSym}`}
-            >
-              {fundBusy ? "Persisting…" : "Save fundamentals (5y annual)"}
-            </button>
-          )}
-
-          {/* English: persistent status line + optional error pill */}
-          {fundSaveStatus && <span style={{ fontSize: 12, opacity: 0.7 }}>{fundSaveStatus}</span>}
-          {fundErr && <StatusPill kind="err">{fundErr}</StatusPill>}
+      {/* English: small status message for auto-refresh process */}
+      {autoStatus && (
+        <div
+          style={{
+            fontSize: 12,
+            opacity: 0.85,
+            marginTop: 6,
+            lineHeight: 1.4,
+            whiteSpace: "pre-line", // wichtig für Zeilenumbruch
+          }}
+        >
+          {autoStatus}
         </div>
       )}
 

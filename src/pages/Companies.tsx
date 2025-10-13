@@ -185,6 +185,7 @@ type CompanySummary = {
   name?: string;
   sector?: string;
   shares: number;
+  lastPriceUpdate?: string | null;
 };
 
 export default function Companies() {

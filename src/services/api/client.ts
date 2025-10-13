@@ -29,17 +29,18 @@ interface HttpError extends Error {
   traceId?: string;
 }
 
-/**
- * Read base URL from Vite env (must start with VITE_)
- * Example (development): VITE_API_BASE_URL=http://localhost:5000
- */
-const API_BASE_URL =
-  (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/+$/, "") || "";
+// -----------------------------------------------------------
+// Reads API base from Vite environment:
+//  - Dev:  /api   → goes through Vite proxy to backend
+//  - Prod: absolute URL (e.g. https://api.domain.tld)
+// -----------------------------------------------------------
+const API_BASE =
+  (import.meta.env.VITE_API_BASE as string | undefined)?.replace(/\/+$/, "") || "";
 
-/** EN: Build absolute URL (or keep relative for mocks/previews). */
+/** Build absolute or relative URL */
 function buildUrl(path: string): string {
-  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
-  return `${API_BASE_URL}${normalizedPath}`;
+  const normalized = path.startsWith("/") ? path : `/${path}`;
+  return `${API_BASE}${normalized}`;
 }
 
 /** ---------------- Retry helpers ------------------ */

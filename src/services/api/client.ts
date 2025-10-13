@@ -34,8 +34,10 @@ interface HttpError extends Error {
 //  - Dev:  /api   → goes through Vite proxy to backend
 //  - Prod: absolute URL (e.g. https://api.domain.tld)
 // -----------------------------------------------------------
-const API_BASE =
-  (import.meta.env.VITE_API_BASE as string | undefined)?.replace(/\/+$/, "") || "";
+const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined)?.replace(/\/+$/, "") || "";
+
+// console.log("[DEBUG] VITE_API_BASE =", import.meta.env.VITE_API_BASE);
+// console.log("[DEBUG] API_BASE =", API_BASE);
 
 /** Build absolute or relative URL */
 function buildUrl(path: string): string {

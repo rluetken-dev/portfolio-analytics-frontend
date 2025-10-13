@@ -15,7 +15,7 @@ export default defineConfig({
         target: `http://${windowsHost}:${backendPort}`,
         changeOrigin: true,
         secure: false,
-        // optional logging
+        //rewrite: (path) => path.replace(/^\/api/, ""),  // ✅ entfernt führendes /api
         configure: (proxy) => {
           proxy.on("error", (err) => console.error("[Proxy Error]", err.message));
           proxy.on("proxyReq", (_, req) => console.log("[Proxy]", req.url));

@@ -36,7 +36,7 @@ export interface CreateUserCompanyRequest {
 export async function getUserCompanies(): Promise<UserCompany[]> {
   return fetchJson<UserCompany[]>({
     method: "GET",
-    path: "/api/UserCompany",
+    path: "/UserCompany",
   });
 }
 
@@ -44,7 +44,7 @@ export async function getUserCompanies(): Promise<UserCompany[]> {
 export async function addUserCompany(data: CreateUserCompanyRequest): Promise<UserCompany> {
   return fetchJson<UserCompany, CreateUserCompanyRequest>({
     method: "POST",
-    path: "/api/UserCompany",
+    path: "/UserCompany",
     body: data,
   });
 }
@@ -53,6 +53,6 @@ export async function addUserCompany(data: CreateUserCompanyRequest): Promise<Us
 export async function deleteUserCompany(id: number): Promise<void> {
   await fetchJson({
     method: "DELETE",
-    path: `/api/UserCompany/${id}`,
+    path: `/UserCompany/${id}`,
   });
 }

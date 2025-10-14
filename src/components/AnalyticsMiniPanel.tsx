@@ -868,6 +868,7 @@ export default function AnalyticsMiniPanel({
   // 🧩 Improved auto-refresh + auto-reload behavior
   const checkDataFreshness = useCallback(
     async (sym: string) => {
+      console.info(`[auto-refresh] triggered for ${sym}`);
       if (!sym) return;
 
       let priceMsg = "⚙️ Checking price data...";
@@ -977,21 +978,16 @@ export default function AnalyticsMiniPanel({
       if (priceRefreshed || fundamentalsRefreshed) {
         setAutoStatus((prev) => `${prev}\n♻️ Refresh complete — updating analytics...`);
 
-        try {
-          await load(sym);
-          const hasData = sections.some((sec) =>
-            sec.items.some((i) => i.value && i.value !== "n/a" && i.label !== "Price"),
-          );
-
-          if (!hasData) {
-            setAutoStatus(
-              (prev) => `${prev}\nℹ️ Analytics data not yet available — please try again later`,
-            );
+        // Delay reload slightly to avoid race with handleResolveAndLoad()
+        setTimeout(async () => {
+          try {
+            console.info(`[auto-refresh] ${sym}: reloading analytics after refresh...`);
+            await load(sym);
+          } catch (err) {
+            console.error("[auto-refresh] reload failed:", err);
+            setAutoStatus((prev) => `${prev}\n⚠️ Reload failed — please retry manually`);
           }
-        } catch (err) {
-          console.error("[auto-refresh] reload failed:", err);
-          setAutoStatus((prev) => `${prev}\n⚠️ Reload failed — please retry manually`);
-        }
+        }, 800);
       }
     },
     [load, sections],
@@ -1022,12 +1018,18 @@ export default function AnalyticsMiniPanel({
 
   // English: run auto-refresh check whenever a new symbol is confirmed (panel opened)
   useEffect(() => {
-    if (!confirmedSym) return; // no active panel
+    if (!confirmedSym) return;
+
+    // Prevent multiple runs for same symbol
+    if (lastAnnouncedRef.current === `freshness:${confirmedSym}`) return;
+    lastAnnouncedRef.current = `freshness:${confirmedSym}`;
+
     checkDataFreshness(confirmedSym).catch((err) => {
       console.warn("[auto-refresh] check failed:", err);
       setAutoStatus("⚠️ Auto-refresh check failed");
     });
-  }, [confirmedSym, checkDataFreshness]);
+  }, [confirmedSym]);
+
 
   return (
     <div

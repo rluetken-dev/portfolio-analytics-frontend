@@ -865,35 +865,35 @@ export default function AnalyticsMiniPanel({
     setSymbol,
   ]);
 
-  // 🧩 Improved auto-refresh + auto-reload behavior
+ // 🧩 Improved auto-refresh + auto-reload behavior (multi-line version)
   const checkDataFreshness = useCallback(
     async (sym: string) => {
       console.info(`[auto-refresh] triggered for ${sym}`);
       if (!sym) return;
 
-      let priceMsg = "⚙️ Checking price data...";
-      let fundMsg = "⚙️ Checking fundamentals...";
+      // Reset UI
+      setAutoStatus("⚙️ Checking data freshness...");
+
+      // Local final messages
+      let priceLine = "";
+      let fundLine = "";
+      let analyticsLine = "";
       let priceRefreshed = false;
       let fundamentalsRefreshed = false;
 
       // --- 1️⃣ Price freshness check ---
       try {
         const resp = await fetch(`/api/quotes/latest?symbol=${sym}`);
-
-        // detect network-level failure (CORS / ECONNREFUSED)
-        if (!resp || resp.type === "opaque") {
-          throw new Error("Fetch unreachable or CORS blocked");
-        }
+        if (!resp || resp.type === "opaque") throw new Error("Fetch unreachable or CORS blocked");
 
         if (resp.status === 404) {
-          priceMsg = "🆕 No local data → fetching...";
           const refreshResp = await fetchJson({
             path: `/api/quotes/refresh?symbols=${sym}&range=30d`,
             method: "POST",
             timeoutMs: 45_000,
           });
           console.log(`[AnalyticsMiniPanel] ${sym}: initial price data fetched`, refreshResp);
-          priceMsg = "✅ Price data fetched successfully";
+          priceLine = "✅ Price data fetched successfully";
           priceRefreshed = true;
         } else if (resp.ok) {
           const data = await resp.json();
@@ -902,7 +902,6 @@ export default function AnalyticsMiniPanel({
           const tooOld = !lastUpdate || Date.now() - lastUpdate.getTime() > 1000 * 60 * 60 * 24;
 
           if (tooOld) {
-            priceMsg = `⚠️ Price data outdated (last: ${latestEntry?.date}) → refreshing...`;
             try {
               const refreshResp = await fetchJson({
                 path: `/api/quotes/refresh?symbols=${sym}&range=30d`,
@@ -910,21 +909,21 @@ export default function AnalyticsMiniPanel({
                 timeoutMs: 45_000,
               });
               console.log(`[AnalyticsMiniPanel] ${sym}: price refresh successful`, refreshResp);
-              priceMsg = "✅ Price data refreshed successfully";
+              priceLine = "✅ Price data refreshed successfully";
               priceRefreshed = true;
             } catch (err) {
               console.error(`[AnalyticsMiniPanel] ${sym}: price refresh failed`, err);
-              priceMsg = "⚠️ Could not refresh price data (API limit or network issue)";
+              priceLine = "⚠️ Could not refresh price data (API limit or network issue)";
             }
           } else {
-            priceMsg = `✅ Price data up to date (${latestEntry?.date})`;
+            priceLine = `✅ Price data up to date (${latestEntry?.date})`;
           }
         } else {
-          priceMsg = `⚠️ Could not check price freshness (HTTP ${resp.status})`;
+          priceLine = `⚠️ Could not check price freshness (HTTP ${resp.status})`;
         }
       } catch (err) {
         console.error("[auto-refresh] price check failed:", err);
-        priceMsg = "⚠️ Quotes API not reachable (CORS or backend down)";
+        priceLine = "⚠️ Quotes API not reachable (CORS or backend down)";
       }
 
       // --- 2️⃣ Fundamentals freshness check ---
@@ -942,55 +941,54 @@ export default function AnalyticsMiniPanel({
             (fundData?.inserted?.cash ?? 0);
 
           if (totalInserted > 0) {
-            fundMsg = "✅ Fundamentals updated successfully";
+            fundLine = "✅ Fundamentals updated successfully";
             fundamentalsRefreshed = true;
           } else {
-            // 🧠 double-check via latest endpoint
             const latestFundResp = await fetch(`/api/fundamentals/latest?symbol=${sym}`);
             if (latestFundResp.ok) {
               const latestFundData = await latestFundResp.json();
               if (!latestFundData || Object.keys(latestFundData).length === 0) {
-                fundMsg = "⚠️ No fundamentals data found — analytics may be empty";
+                fundLine = "⚠️ No fundamentals data found — analytics may be empty";
               } else {
-                fundMsg = "✅ Fundamentals already up to date";
+                fundLine = "✅ Fundamentals already up to date";
               }
             } else {
-              fundMsg = "⚠️ Could not verify fundamentals presence";
+              fundLine = "⚠️ Could not verify fundamentals presence";
             }
           }
         } else if (fundResp.status === 429) {
-          fundMsg = "⚠️ Fundamentals refresh skipped (API limit reached)";
+          fundLine = "⚠️ Fundamentals refresh skipped (API limit reached)";
         } else if (fundResp.status === 404) {
-          fundMsg = "🆕 No fundamentals in DB yet → fetching...";
+          fundLine = "🆕 No fundamentals in DB yet → fetching...";
           fundamentalsRefreshed = true;
         } else {
-          fundMsg = `⚠️ Could not refresh fundamentals (HTTP ${fundResp.status})`;
+          fundLine = `⚠️ Could not refresh fundamentals (HTTP ${fundResp.status})`;
         }
       } catch (err) {
         console.error("[auto-refresh] fundamentals check failed:", err);
-        fundMsg = "⚠️ Fundamentals API not reachable (CORS or backend down)";
+        fundLine = "⚠️ Fundamentals API not reachable (CORS or backend down)";
       }
 
-      // ✅ Display final message
-      setAutoStatus(`${priceMsg}\n${fundMsg}`);
-
-      // --- 3️⃣ Auto reload if refreshed ---
+      // --- 3️⃣ Analytics reload ---
       if (priceRefreshed || fundamentalsRefreshed) {
-        setAutoStatus((prev) => `${prev}\n♻️ Refresh complete — updating analytics...`);
-
-        // Delay reload slightly to avoid race with handleResolveAndLoad()
-        setTimeout(async () => {
-          try {
-            console.info(`[auto-refresh] ${sym}: reloading analytics after refresh...`);
-            await load(sym);
-          } catch (err) {
-            console.error("[auto-refresh] reload failed:", err);
-            setAutoStatus((prev) => `${prev}\n⚠️ Reload failed — please retry manually`);
-          }
-        }, 800);
+        try {
+          await load(sym);
+          analyticsLine = "✅ Analytics successfully reloaded";
+        } catch (err) {
+          console.error("[auto-refresh] reload failed:", err);
+          analyticsLine = "⚠️ Reload failed — please retry manually";
+        }
+      } else {
+        analyticsLine = "✅ Analytics already up to date";
       }
+
+      // 🧾 Display all final results together
+      setAutoStatus(`${priceLine}\n${fundLine}\n${analyticsLine}`);
+
+      // 🕒 Auto-hide after 7 seconds
+      setTimeout(() => setAutoStatus(null), 7000);
     },
-    [load, sections],
+    [load],
   );
 
   useEffect(() => {

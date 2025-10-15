@@ -248,6 +248,7 @@ export default function AnalyticsMiniPanel({
 
   // --- Auto-refresh status indicator ---
   const [autoStatus, setAutoStatus] = useState<string | null>(null); // English: small status line shown during freshness check
+  const [isStatusExiting, setIsStatusExiting] = useState(false); // English: controls fade-out animation
 
   // English: persist pinned list on change
   useEffect(() => {
@@ -984,12 +985,32 @@ export default function AnalyticsMiniPanel({
 
       // 🧾 Display all final results together
       setAutoStatus(`${priceLine}\n${fundLine}\n${analyticsLine}`);
-
-      // 🕒 Auto-hide after 7 seconds
-      setTimeout(() => setAutoStatus(null), 7000);
+      setIsStatusExiting(false); // Reset exit state for new message
     },
     [load],
   );
+
+  // 🕒 Auto-hide status after 7 seconds with smooth fade-out animation
+  useEffect(() => {
+    if (!autoStatus) {
+      setIsStatusExiting(false);
+      return;
+    }
+
+    const hideTimer = setTimeout(() => {
+      setIsStatusExiting(true); // Trigger fade-out animation
+      
+      // Remove status after animation completes
+      const removeTimer = setTimeout(() => {
+        setAutoStatus(null);
+        setIsStatusExiting(false);
+      }, 300); // Match animation duration
+
+      return () => clearTimeout(removeTimer);
+    }, 7000);
+
+    return () => clearTimeout(hideTimer);
+  }, [autoStatus]);
 
   useEffect(() => {
     typingRef.current = true; // block any auto-load until user confirms
@@ -1185,20 +1206,53 @@ export default function AnalyticsMiniPanel({
         </button>
       </div>
 
-      {/* English: small status message for auto-refresh process */}
+      {/* English: animated status message for auto-refresh process */}
       {autoStatus && (
         <div
           style={{
             fontSize: 12,
-            opacity: 0.85,
-            marginTop: 6,
-            lineHeight: 1.4,
-            whiteSpace: "pre-line", // wichtig für Zeilenumbruch
+            lineHeight: 1.5,
+            marginTop: 8,
+            padding: "10px 12px",
+            borderRadius: 10,
+            border: "1px solid rgba(255, 255, 255, 0.1)",
+            background: "linear-gradient(135deg, rgba(34, 197, 94, 0.08) 0%, rgba(59, 130, 246, 0.08) 100%)",
+            backdropFilter: "blur(8px)",
+            boxShadow: "0 2px 8px rgba(0, 0, 0, 0.15)",
+            animation: isStatusExiting 
+              ? "fadeSlideOut 0.3s cubic-bezier(0.4, 0, 1, 1) forwards"
+              : "fadeSlideIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards",
+            whiteSpace: "pre-line",
+            opacity: 0,
+            transform: "translateY(-8px)",
           }}
         >
           {autoStatus}
         </div>
       )}
+      
+      {/* English: CSS keyframes for smooth animations */}
+      <style>
+        {`
+          @keyframes fadeSlideIn {
+            to {
+              opacity: 1;
+              transform: translateY(0);
+            }
+          }
+          
+          @keyframes fadeSlideOut {
+            from {
+              opacity: 1;
+              transform: translateY(0);
+            }
+            to {
+              opacity: 0;
+              transform: translateY(-8px);
+            }
+          }
+        `}
+      </style>
 
       {err && <div style={{ fontSize: 12, color: "#f87171", marginBottom: 8 }}>{err}</div>}
 

@@ -16,7 +16,17 @@ export default function NavBar() {
 
   // --- Dropdown logic for currency menu ---
   const [open, setOpen] = useState(false);
+  const [isAnimating, setIsAnimating] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (open) {
+      setIsAnimating(true);
+    } else {
+      const timeout = setTimeout(() => setIsAnimating(false), 200);
+      return () => clearTimeout(timeout);
+    }
+  }, [open]);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -106,7 +116,8 @@ export default function NavBar() {
           💱 {currency} ▼
         </button>
 
-        {open && (
+        {/* Animated dropdown with delayed unmount */}
+        {(open || isAnimating) && (
           <div
             style={{
               position: "absolute",
@@ -118,6 +129,10 @@ export default function NavBar() {
               boxShadow: "0 4px 10px rgba(0,0,0,0.3)",
               zIndex: 100,
               minWidth: 100,
+              opacity: open ? 1 : 0,
+              transform: open ? "translateY(0)" : "translateY(-4px)",
+              transition: "opacity 0.25s ease, transform 0.25s cubic-bezier(0.25, 0.8, 0.25, 1)",
+              pointerEvents: open ? "auto" : "none",
             }}
           >
             {["USD", "EUR", "CHF", "GBP", "JPY"].map((code) => (
@@ -132,6 +147,17 @@ export default function NavBar() {
                   cursor: "pointer",
                   background: code === currency ? "#333" : "transparent",
                   color: code === currency ? "#22c55e" : "white",
+                  transition: "background 0.2s ease, color 0.2s ease",
+                }}
+                onMouseEnter={(e) => {
+                  (e.currentTarget as HTMLDivElement).style.background = "#2a2a2a";
+                  (e.currentTarget as HTMLDivElement).style.color = "#22c55e";
+                }}
+                onMouseLeave={(e) => {
+                  (e.currentTarget as HTMLDivElement).style.background =
+                    code === currency ? "#333" : "transparent";
+                  (e.currentTarget as HTMLDivElement).style.color =
+                    code === currency ? "#22c55e" : "white";
                 }}
               >
                 {code}

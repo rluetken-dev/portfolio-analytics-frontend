@@ -13,7 +13,7 @@ import Register from "./pages/Register";
 
 // Import components
 import NavBar from "./components/NavBar";
-import CurrencyDebug from "./components/CurrencyDebug";
+// import CurrencyDebug from "./components/CurrencyDebug";
 
 // Import AuthProvider
 import { AuthProvider } from "./context/AuthProvider";
@@ -24,11 +24,10 @@ function App() {
     <AuthProvider>
       <div style={{ padding: "2rem", fontFamily: "Arial, sans-serif" }}>
         <NavBar />
-
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/about" element={<About />} />
-          <Route path="/health" element={<Health />} />
+          <Route path="/health" element={<Health />} />          
           <Route
             path="/companies"
             element={
@@ -49,7 +48,7 @@ function App() {
           <Route path="/register" element={<Register />} /> {/* ✅ NEU */}
           <Route path="*" element={<NotFound />} />
         </Routes>
-        <CurrencyDebug />
+        {/* <CurrencyDebug /> */}
       </div>
     </AuthProvider>
   );

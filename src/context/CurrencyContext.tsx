@@ -14,7 +14,9 @@ export type CurrencyContextType = {
 
 // ---------------- Provider ----------------
 export function CurrencyProvider({ children }: { children: ReactNode }) {
-  const [currency, setCurrency] = useState<CurrencyCode>("USD");
+  const [currency, setCurrency] = useState<CurrencyCode>(
+    (localStorage.getItem("selectedCurrency") as CurrencyCode) || "USD",
+  );
   const [rates, setRates] = useState<Record<string, number>>(getRates());
 
   useEffect(() => {
@@ -28,6 +30,10 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
       }
     })();
   }, []);
+
+  useEffect(() => {
+    localStorage.setItem("selectedCurrency", currency);
+  }, [currency]);
 
   const formatMoney = (amount: number, from?: CurrencyCode): string => {
     let displayAmount = amount;

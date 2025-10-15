@@ -1,6 +1,12 @@
 import { useState, useEffect } from "react";
 import type { ReactNode } from "react";
-import { convertCurrency, getRates, updateRates, loadExchangeRates } from "../utils/currencyUtils";
+import {
+  convertCurrency,
+  getRates,
+  updateRates,
+  loadExchangeRates,
+  formatMoneyDynamic,
+} from "../utils/currencyUtils";
 import type { CurrencyCode } from "../types/currency";
 import { CurrencyContext } from "./CurrencyContextObject";
 
@@ -10,6 +16,7 @@ export type CurrencyContextType = {
   setCurrency: (code: CurrencyCode) => void;
   rates: Record<string, number>;
   formatMoney: (amount: number, from?: CurrencyCode) => string;
+  formatMoneyFrom: (amount: number, from: CurrencyCode) => string;
 };
 
 // ---------------- Provider ----------------
@@ -48,8 +55,21 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
     }).format(displayAmount);
   };
 
+  // Converts and formats an amount from a specific base currency
+  const formatMoneyFrom = (amount: number, from: CurrencyCode): string => {
+    return formatMoneyDynamic(amount, from, currency);
+  };
+
   return (
-    <CurrencyContext.Provider value={{ currency, setCurrency, rates, formatMoney }}>
+    <CurrencyContext.Provider
+      value={{
+        currency,
+        setCurrency,
+        rates,
+        formatMoney,
+        formatMoneyFrom, // ✅ neu hinzugefügt
+      }}
+    >
       {children}
     </CurrencyContext.Provider>
   );

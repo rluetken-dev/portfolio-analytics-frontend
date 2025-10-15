@@ -2,6 +2,7 @@
  * Basic currency conversion utility.
  * Converts amounts between currencies using a rates cache (base: USD).
  */
+import { currencySymbols } from "../constants/currencySymbols";
 
 // Define supported currency codes
 export type CurrencyCode = "USD" | "EUR" | "CHF" | "GBP" | "JPY";
@@ -80,4 +81,31 @@ export function updateRates(newRates: Partial<ExchangeRates>): void {
  */
 export function getRates(): ExchangeRates {
   return { ...cachedRates };
+}
+
+/**
+ * Converts and formats an amount between currencies with symbol.
+ */
+export function formatMoneyDynamic(
+  amount: number,
+  from: string = "USD",
+  to: string = "USD",
+): string {
+  try {
+    // Cast to CurrencyCode, since we know only valid codes will be passed
+    const converted = convertCurrency(amount, from as CurrencyCode, to as CurrencyCode);
+
+    const symbol = currencySymbols[to.toUpperCase() as keyof typeof currencySymbols] || to;
+
+    return (
+      new Intl.NumberFormat(to === "USD" ? "en-US" : "de-DE", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      }).format(converted) +
+      " " +
+      symbol
+    );
+  } catch {
+    return `${amount.toFixed(2)} ${to}`;
+  }
 }

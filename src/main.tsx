@@ -4,15 +4,18 @@ import { BrowserRouter } from "react-router-dom";
 
 import App from "./App";
 import "./index.css";
-import { NotificationProvider } from "./context/NotificationProvider"; // ⬅️ import added
+import { NotificationProvider } from "./context/NotificationProvider";
+import { CurrencyProvider } from "./context/CurrencyContext";
 
-// English: wrap the app with NotificationProvider so notifications are global
+// Wrap the app with CurrencyProvider and NotificationProvider for global access
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <BrowserRouter>
-      <NotificationProvider>
-        <App />
-      </NotificationProvider>
+      <CurrencyProvider>
+        <NotificationProvider>
+          <App />
+        </NotificationProvider>
+      </CurrencyProvider>
     </BrowserRouter>
   </React.StrictMode>,
 );

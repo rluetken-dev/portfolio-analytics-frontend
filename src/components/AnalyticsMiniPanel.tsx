@@ -272,26 +272,23 @@ export default function AnalyticsMiniPanel({
   const backendBase = useMemo(() => "", []);
 
   // English: always resolve user input (name or symbol-ish) to a TICKER via backend search
-  const resolveToTicker = useCallback(
-    async (input: string): Promise<string | null> => {
-      const q = (input ?? "").trim();
-      if (!q) return null;
+  const resolveToTicker = useCallback(async (input: string): Promise<string | null> => {
+    const q = (input ?? "").trim();
+    if (!q) return null;
 
-      try {
-        const resp = await fetch(`/api/companies?q=${encodeURIComponent(q)}&limit=1`, {
-          headers: { Accept: "application/json" },
-        });
-        if (!resp.ok) return null;
+    try {
+      const resp = await fetch(`/api/companies?q=${encodeURIComponent(q)}&limit=1`, {
+        headers: { Accept: "application/json" },
+      });
+      if (!resp.ok) return null;
 
-        const arr = (await resp.json()) as Array<{ symbol?: string }>;
-        const sym = Array.isArray(arr) && arr.length > 0 ? arr[0]?.symbol : undefined;
-        return sym ? String(sym).toUpperCase() : null;
-      } catch {
-        return null; // English: best-effort; no fallback guess here
-      }
-    },
-    [backendBase],
-  );
+      const arr = (await resp.json()) as Array<{ symbol?: string }>;
+      const sym = Array.isArray(arr) && arr.length > 0 ? arr[0]?.symbol : undefined;
+      return sym ? String(sym).toUpperCase() : null;
+    } catch {
+      return null; // English: best-effort; no fallback guess here
+    }
+  }, []);
 
   // English: add current selection to pinned, always as a TICKER symbol
   const pinAddCurrent = useCallback(async (): Promise<void> => {
@@ -783,6 +780,7 @@ export default function AnalyticsMiniPanel({
         return null; // best-effort
       }
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [backendBase],
   );
 
@@ -866,7 +864,7 @@ export default function AnalyticsMiniPanel({
     setSymbol,
   ]);
 
- // 🧩 Improved auto-refresh + auto-reload behavior (multi-line version)
+  // 🧩 Improved auto-refresh + auto-reload behavior (multi-line version)
   const checkDataFreshness = useCallback(
     async (sym: string) => {
       console.info(`[auto-refresh] triggered for ${sym}`);
@@ -999,7 +997,7 @@ export default function AnalyticsMiniPanel({
 
     const hideTimer = setTimeout(() => {
       setIsStatusExiting(true); // Trigger fade-out animation
-      
+
       // Remove status after animation completes
       const removeTimer = setTimeout(() => {
         setAutoStatus(null);
@@ -1047,8 +1045,7 @@ export default function AnalyticsMiniPanel({
       console.warn("[auto-refresh] check failed:", err);
       setAutoStatus("⚠️ Auto-refresh check failed");
     });
-  }, [confirmedSym]);
-
+  }, [confirmedSym, checkDataFreshness]);
 
   return (
     <div
@@ -1216,10 +1213,11 @@ export default function AnalyticsMiniPanel({
             padding: "10px 12px",
             borderRadius: 10,
             border: "1px solid rgba(255, 255, 255, 0.1)",
-            background: "linear-gradient(135deg, rgba(34, 197, 94, 0.08) 0%, rgba(59, 130, 246, 0.08) 100%)",
+            background:
+              "linear-gradient(135deg, rgba(34, 197, 94, 0.08) 0%, rgba(59, 130, 246, 0.08) 100%)",
             backdropFilter: "blur(8px)",
             boxShadow: "0 2px 8px rgba(0, 0, 0, 0.15)",
-            animation: isStatusExiting 
+            animation: isStatusExiting
               ? "fadeSlideOut 0.3s cubic-bezier(0.4, 0, 1, 1) forwards"
               : "fadeSlideIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards",
             whiteSpace: "pre-line",
@@ -1230,7 +1228,7 @@ export default function AnalyticsMiniPanel({
           {autoStatus}
         </div>
       )}
-      
+
       {/* English: CSS keyframes for smooth animations */}
       <style>
         {`

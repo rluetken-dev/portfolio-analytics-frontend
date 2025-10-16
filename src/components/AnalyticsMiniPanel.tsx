@@ -1,10 +1,12 @@
 // src/components/AnalyticsMiniPanel.tsx
-import { useCallback, useMemo, useState, useEffect, useRef } from "react";
+import { useCallback, useMemo, useState, useEffect, useRef, useContext } from "react";
 import { getLatestCloseFromQuotes } from "../services/api/quotes";
 import { fetchFundamentalsSnapshot, type SnapshotResult } from "../services/api/fundamentals";
 import { fetchLatestDateISO } from "../utils/dateUtils";
 import { fetchJson } from "../services/api/client";
 import type { CurrentQuote } from "../services/api/quotes";
+import { CurrencyContext } from "../context/CurrencyContextObject";
+import type { CurrencyCode } from "../types/currency";
 
 /**
  * Very small self-contained panel to show two metrics for a symbol:
@@ -17,8 +19,9 @@ import type { CurrentQuote } from "../services/api/quotes";
  */
 type Metric = {
   label: string;
-  value: string;
+  value: string | number | null;
   hint?: string;
+  baseUnit?: string;
 };
 
 type MetricSection = {
@@ -96,36 +99,36 @@ function SkeletonCard({ label }: { label: string }) {
   );
 }
 
-// English: compact number formatter for big absolutes (K/M/B/T)
-function formatCompactNumber(n: number): string {
-  const abs = Math.abs(n);
-  const fmt = (v: number, s: string) =>
-    // fewer decimals for bigger magnitudes
-    `${v >= 100 ? v.toFixed(0) : v >= 10 ? v.toFixed(1) : v.toFixed(2)}${s}`;
+// // English: compact number formatter for big absolutes (K/M/B/T)
+// function formatCompactNumber(n: number): string {
+//   const abs = Math.abs(n);
+//   const fmt = (v: number, s: string) =>
+//     // fewer decimals for bigger magnitudes
+//     `${v >= 100 ? v.toFixed(0) : v >= 10 ? v.toFixed(1) : v.toFixed(2)}${s}`;
 
-  if (abs >= 1e12) return fmt(n / 1e12, "T");
-  if (abs >= 1e9) return fmt(n / 1e9, "B");
-  if (abs >= 1e6) return fmt(n / 1e6, "M");
-  if (abs >= 1e3) return fmt(n / 1e3, "K");
-  return abs >= 100 ? n.toFixed(0) : abs >= 10 ? n.toFixed(1) : n.toFixed(2);
-}
+//   if (abs >= 1e12) return fmt(n / 1e12, "T");
+//   if (abs >= 1e9) return fmt(n / 1e9, "B");
+//   if (abs >= 1e6) return fmt(n / 1e6, "M");
+//   if (abs >= 1e3) return fmt(n / 1e3, "K");
+//   return abs >= 100 ? n.toFixed(0) : abs >= 10 ? n.toFixed(1) : n.toFixed(2);
+// }
 
-// English: unified format helpers
-function formatPercent(v: number | null | undefined): string {
-  if (v == null || Number.isNaN(v)) return "n/a";
-  return `${(v * 100).toFixed(1)}%`;
-}
+// // English: unified format helpers
+// function formatPercent(v: number | null | undefined): string {
+//   if (v == null || Number.isNaN(v)) return "n/a";
+//   return `${(v * 100).toFixed(1)}%`;
+// }
 
-function formatRatio(v: number | null | undefined): string {
-  if (v == null || Number.isNaN(v)) return "n/a";
-  return `${v.toFixed(2)}x`;
-}
+// function formatRatio(v: number | null | undefined): string {
+//   if (v == null || Number.isNaN(v)) return "n/a";
+//   return `${v.toFixed(2)}x`;
+// }
 
-function formatPerShare(v: number | null | undefined, unit?: string): string {
-  if (v == null || Number.isNaN(v)) return "n/a";
-  // Keep 2 decimals and append unit (USD/EUR) if provided
-  return `${v.toFixed(2)}${unit ? ` ${unit}` : ""}`;
-}
+// function formatPerShare(v: number | null | undefined, unit?: string): string {
+//   if (v == null || Number.isNaN(v)) return "n/a";
+//   // Keep 2 decimals and append unit (USD/EUR) if provided
+//   return `${v.toFixed(2)}${unit ? ` ${unit}` : ""}`;
+// }
 
 // Format Date -> "YYYY-MM-DD"
 function fmt(d: Date) {
@@ -210,6 +213,9 @@ export default function AnalyticsMiniPanel({
   const [live, setLive] = useState<CurrentQuote | null>(null); // English: latest live quote payload
   const [baseClose, setBaseClose] = useState<number | null>(null); // English: last cached close for delta badge
 
+  // stores unformatted base values (always numeric, original currency)
+  const [baseSections, setBaseSections] = useState<MetricSection[]>([]);
+
   // --- Fundamentals raw snapshot (debug/preview; not persisted) ---
   const [fundRes, setFundRes] = useState<SnapshotResult | null>(null); // English: result of snapshot call
 
@@ -249,6 +255,74 @@ export default function AnalyticsMiniPanel({
   // --- Auto-refresh status indicator ---
   const [autoStatus, setAutoStatus] = useState<string | null>(null); // English: small status line shown during freshness check
   const [isStatusExiting, setIsStatusExiting] = useState(false); // English: controls fade-out animation
+
+  const { formatMoneyFrom, currency } = useContext(CurrencyContext)!;
+
+  // Safe converter for price.unit → CurrencyCode
+  const safeCurrencyCode = (unit?: string): CurrencyCode => {
+    const u = (unit ?? "USD").toUpperCase();
+    const valid: CurrencyCode[] = ["USD", "EUR", "CHF", "GBP", "JPY"];
+    return valid.includes(u as CurrencyCode) ? (u as CurrencyCode) : "USD";
+  };
+
+  function formatDisplayValue(label: string, value: number | string | null): string {
+    if (value == null || value === "n/a" || Number.isNaN(value)) return "n/a";
+
+    const num = typeof value === "string" ? parseFloat(value) : value;
+    if (!Number.isFinite(num)) return String(value);
+
+    const code = currency;
+    const isEuropean = ["EUR", "CHF", "GBP"].includes(code);
+
+    // console.log("[formatDisplayValue]", { label, value, baseUnit, code });
+
+    // 💱 Money-like values
+    if (["Price", "EPS", "BVPS", "OEPS", "FCF (abs)", "Owner Earnings"].includes(label)) {
+      // Compact notation for large amounts
+      if (Math.abs(num) >= 1e6) {
+        const abs = Math.abs(num);
+        const fmt = (v: number, s: string) =>
+          `${v >= 100 ? v.toFixed(0) : v >= 10 ? v.toFixed(1) : v.toFixed(2)}${s}`;
+
+        let short = "";
+        if (abs >= 1e12) short = fmt(num / 1e12, isEuropean ? " Bio" : " T");
+        else if (abs >= 1e9) short = fmt(num / 1e9, isEuropean ? " Mrd" : " B");
+        else if (abs >= 1e6) short = fmt(num / 1e6, " M");
+
+        const symbolized = formatMoneyFrom(1, code);
+        const symbol = symbolized.replace(/[0-9.,\s]+/g, "").trim();
+        return `${short} ${symbol}`;
+      }
+
+      return formatMoneyFrom(num, code);
+    }
+
+    // 📈 Percent
+    if (["ROE", "ROA", "Net Margin", "FCF Yield", "FCF Margin", "OE Yield"].includes(label)) {
+      return `${(num * 100).toFixed(1)}%`;
+    }
+
+    // 📊 Ratio
+    if (["P/E", "P/B", "P/OE", "Debt/Equity", "Asset Turnover"].includes(label)) {
+      return `${num.toFixed(2)}x`;
+    }
+
+    // 🧮 Compact non-money numbers
+    if (Math.abs(num) >= 1e6) {
+      const abs = Math.abs(num);
+      const fmt = (v: number, s: string) =>
+        `${v >= 100 ? v.toFixed(0) : v >= 10 ? v.toFixed(1) : v.toFixed(2)}${s}`;
+      if (abs >= 1e12) return fmt(num / 1e12, isEuropean ? " Bio" : " T");
+      if (abs >= 1e9) return fmt(num / 1e9, isEuropean ? " Mrd" : " B");
+      if (abs >= 1e6) return fmt(num / 1e6, " M");
+    }
+
+    // 🔹 Default: locale-based numeric
+    return num.toLocaleString(undefined, {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2,
+    });
+  }
 
   // English: persist pinned list on change
   useEffect(() => {
@@ -545,10 +619,8 @@ export default function AnalyticsMiniPanel({
             items: [
               {
                 label: "Price",
-                value:
-                  price.value != null
-                    ? `${price.value.toFixed(2)} ${price.unit ?? ""}`.trim()
-                    : "n/a",
+                value: price.value ?? null, // ✅ pure number
+                baseUnit: price.unit ?? "USD",
                 hint:
                   price.status === 200
                     ? price.asOf
@@ -556,15 +628,15 @@ export default function AnalyticsMiniPanel({
                       : undefined
                     : `HTTP ${price.status}`,
               },
-              { label: "P/E", value: peValue != null ? formatRatio(peValue) : "n/a", hint: peHint },
+              { label: "P/E", value: peValue ?? null, hint: peHint },
               {
                 label: "P/B",
-                value: pbRes.value != null ? formatRatio(pbRes.value) : "n/a",
+                value: pbRes.value ?? null,
                 hint: pbRes.status === 200 ? undefined : `HTTP ${pbRes.status}`,
               },
               {
                 label: "P/OE",
-                value: pToOeRes.value != null ? formatRatio(pToOeRes.value) : "n/a",
+                value: pToOeRes.value ?? null,
                 hint: pToOeRes.status === 200 ? undefined : `HTTP ${pToOeRes.status}`,
               },
             ],
@@ -574,32 +646,28 @@ export default function AnalyticsMiniPanel({
             items: [
               {
                 label: "ROE",
-                value: formatPercent(roeRes.value),
+                value: roeRes.value ?? null,
                 hint: roeRes.status === 200 ? undefined : `HTTP ${roeRes.status}`,
               },
               {
                 label: "ROA",
-                value: formatPercent(roaRes.value),
+                value: roaRes.value ?? null,
                 hint: roaRes.status === 200 ? undefined : `HTTP ${roaRes.status}`,
               },
-              {
-                label: "Net Margin",
-                value: netMarginValue != null ? `${(netMarginValue * 100).toFixed(1)}%` : "n/a",
-                hint: netMarginHint,
-              },
+              { label: "Net Margin", value: netMarginValue ?? null, hint: netMarginHint },
               {
                 label: "FCF Yield",
-                value: formatPercent(fcfYieldRes.value),
+                value: fcfYieldRes.value ?? null,
                 hint: fcfYieldRes.status === 200 ? undefined : `HTTP ${fcfYieldRes.status}`,
               },
               {
                 label: "FCF Margin",
-                value: formatPercent(fcfMarginRes.value),
+                value: fcfMarginRes.value ?? null,
                 hint: fcfMarginRes.status === 200 ? undefined : `HTTP ${fcfMarginRes.status}`,
               },
               {
                 label: "OE Yield",
-                value: formatPercent(oeYieldRes.value),
+                value: oeYieldRes.value ?? null,
                 hint: oeYieldRes.status === 200 ? undefined : `HTTP ${oeYieldRes.status}`,
               },
             ],
@@ -609,17 +677,17 @@ export default function AnalyticsMiniPanel({
             items: [
               {
                 label: "Debt/Equity",
-                value: dteRes.value != null ? formatRatio(dteRes.value) : "n/a",
+                value: dteRes.value ?? null,
                 hint: dteRes.status === 200 ? undefined : `HTTP ${dteRes.status}`,
               },
               {
                 label: "Debt/Assets",
-                value: formatPercent(dtaRes.value),
+                value: dtaRes.value ?? null,
                 hint: dtaRes.status === 200 ? undefined : `HTTP ${dtaRes.status}`,
               },
               {
                 label: "Equity Ratio",
-                value: formatPercent(eqRatioRes.value),
+                value: eqRatioRes.value ?? null,
                 hint: eqRatioRes.status === 200 ? undefined : `HTTP ${eqRatioRes.status}`,
               },
             ],
@@ -629,12 +697,12 @@ export default function AnalyticsMiniPanel({
             items: [
               {
                 label: "Asset Turnover",
-                value: atRes.value != null ? formatRatio(atRes.value) : "n/a",
+                value: atRes.value ?? null,
                 hint: atRes.status === 200 ? undefined : `HTTP ${atRes.status}`,
               },
               {
                 label: "Equity CAGR",
-                value: formatPercent(cagrRes.value),
+                value: cagrRes.value ?? null,
                 hint: cagrRes.status === 200 ? undefined : `HTTP ${cagrRes.status}`,
               },
             ],
@@ -644,17 +712,20 @@ export default function AnalyticsMiniPanel({
             items: [
               {
                 label: "EPS",
-                value: epsRes.value != null ? formatPerShare(epsRes.value, price.unit) : "n/a",
+                value: epsRes.value ?? null, // ✅ no formatting here
+                baseUnit: price.unit ?? "USD",
                 hint: epsRes.status === 200 ? undefined : `HTTP ${epsRes.status}`,
               },
               {
                 label: "BVPS",
-                value: bvpsRes.value != null ? formatPerShare(bvpsRes.value, price.unit) : "n/a",
+                value: bvpsRes.value ?? null,
+                baseUnit: price.unit ?? "USD",
                 hint: bvpsRes.status === 200 ? undefined : `HTTP ${bvpsRes.status}`,
               },
               {
                 label: "OEPS",
-                value: oepsRes.value != null ? formatPerShare(oepsRes.value, price.unit) : "n/a",
+                value: oepsRes.value ?? null,
+                baseUnit: price.unit ?? "USD",
                 hint: oepsRes.status === 200 ? undefined : `HTTP ${oepsRes.status}`,
               },
             ],
@@ -664,25 +735,22 @@ export default function AnalyticsMiniPanel({
             items: [
               {
                 label: "FCF (abs)",
-                value:
-                  fcfAbsRes.value != null
-                    ? `${formatCompactNumber(fcfAbsRes.value)} ${price.unit ?? "USD"}`
-                    : "n/a",
+                value: fcfAbsRes.value ?? null,
+                baseUnit: price.unit ?? "USD",
                 hint: fcfAbsRes.status === 200 ? undefined : `HTTP ${fcfAbsRes.status}`,
               },
               {
                 label: "Owner Earnings",
-                value:
-                  oeRes.value != null
-                    ? `${formatCompactNumber(oeRes.value)} ${price.unit ?? "USD"}`
-                    : "n/a",
+                value: oeRes.value ?? null,
+                baseUnit: price.unit ?? "USD",
                 hint: oeRes.status === 200 ? undefined : `HTTP ${oeRes.status}`,
               },
             ],
           },
         ];
 
-        setSections(sectionsData);
+        setBaseSections(sectionsData); // save numeric originals
+        setSections(sectionsData); // initial render
       } catch (e: unknown) {
         console.error("[panel] load failed:", e);
         setErr("Fehler beim Laden der Kennzahlen.");
@@ -693,6 +761,45 @@ export default function AnalyticsMiniPanel({
     },
     [backendBase, symbol, fundRes],
   );
+
+  // 🧩 Recalculate display values when currency changes
+  useEffect(() => {
+    if (baseSections.length === 0) return;
+
+    console.log(`[CurrencyChange] Updating values to ${currency}`);
+
+    const updated = baseSections.map((sec) => {
+      if (["Valuation", "Per Share", "Cash Flow & Owner Earnings"].includes(sec.title)) {
+        return {
+          ...sec,
+          items: sec.items.map((m) => {
+            if (typeof m.value === "number" && ["Price", "EPS", "BVPS", "OEPS"].includes(m.label)) {
+              return {
+                ...m,
+                value: formatMoneyFrom(m.value, safeCurrencyCode(m.baseUnit ?? "USD")),
+              };
+            }
+
+            if (typeof m.value === "string" && ["FCF (abs)", "Owner Earnings"].includes(m.label)) {
+              // extrahiere Zahl aus "12345 USD" → 12345
+              const num = parseFloat(m.value.replace(/[^\d.-]/g, ""));
+              if (!isNaN(num)) {
+                return {
+                  ...m,
+                  value: formatMoneyFrom(num, safeCurrencyCode(m.baseUnit ?? "USD")),
+                };
+              }
+            }
+
+            return m;
+          }),
+        };
+      }
+      return sec;
+    });
+
+    setSections(updated);
+  }, [currency, baseSections, formatMoneyFrom]);
 
   // English: switch to a pinned symbol and trigger an immediate analytics load
   const pinSwitch = useCallback(
@@ -1312,7 +1419,7 @@ export default function AnalyticsMiniPanel({
                         }}
                         title={m.hint ?? undefined}
                       >
-                        <span>{m.value}</span>
+                        <span>{formatDisplayValue(m.label, m.value)}</span>
 
                         {m.label === "Price" &&
                           live?.status === 200 &&

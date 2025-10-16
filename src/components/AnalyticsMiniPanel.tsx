@@ -7,6 +7,7 @@ import { fetchJson } from "../services/api/client";
 import type { CurrentQuote } from "../services/api/quotes";
 import { CurrencyContext } from "../context/CurrencyContextObject";
 import type { CurrencyCode } from "../types/currency";
+import { useFormatDisplayValue } from "../utils/formatDisplayValue";
 
 /**
  * Very small self-contained panel to show two metrics for a symbol:
@@ -257,6 +258,7 @@ export default function AnalyticsMiniPanel({
   const [isStatusExiting, setIsStatusExiting] = useState(false); // English: controls fade-out animation
 
   const { formatMoneyFrom, currency } = useContext(CurrencyContext)!;
+  const { formatDisplayValue } = useFormatDisplayValue();
 
   // Safe converter for price.unit → CurrencyCode
   const safeCurrencyCode = (unit?: string): CurrencyCode => {
@@ -264,65 +266,6 @@ export default function AnalyticsMiniPanel({
     const valid: CurrencyCode[] = ["USD", "EUR", "CHF", "GBP", "JPY"];
     return valid.includes(u as CurrencyCode) ? (u as CurrencyCode) : "USD";
   };
-
-  function formatDisplayValue(label: string, value: number | string | null): string {
-    if (value == null || value === "n/a" || Number.isNaN(value)) return "n/a";
-
-    const num = typeof value === "string" ? parseFloat(value) : value;
-    if (!Number.isFinite(num)) return String(value);
-
-    const code = currency;
-    const isEuropean = ["EUR", "CHF", "GBP"].includes(code);
-
-    // console.log("[formatDisplayValue]", { label, value, baseUnit, code });
-
-    // 💱 Money-like values
-    if (["Price", "EPS", "BVPS", "OEPS", "FCF (abs)", "Owner Earnings"].includes(label)) {
-      // Compact notation for large amounts
-      if (Math.abs(num) >= 1e6) {
-        const abs = Math.abs(num);
-        const fmt = (v: number, s: string) =>
-          `${v >= 100 ? v.toFixed(0) : v >= 10 ? v.toFixed(1) : v.toFixed(2)}${s}`;
-
-        let short = "";
-        if (abs >= 1e12) short = fmt(num / 1e12, isEuropean ? " Bio" : " T");
-        else if (abs >= 1e9) short = fmt(num / 1e9, isEuropean ? " Mrd" : " B");
-        else if (abs >= 1e6) short = fmt(num / 1e6, " M");
-
-        const symbolized = formatMoneyFrom(1, code);
-        const symbol = symbolized.replace(/[0-9.,\s]+/g, "").trim();
-        return `${short} ${symbol}`;
-      }
-
-      return formatMoneyFrom(num, code);
-    }
-
-    // 📈 Percent
-    if (["ROE", "ROA", "Net Margin", "FCF Yield", "FCF Margin", "OE Yield"].includes(label)) {
-      return `${(num * 100).toFixed(1)}%`;
-    }
-
-    // 📊 Ratio
-    if (["P/E", "P/B", "P/OE", "Debt/Equity", "Asset Turnover"].includes(label)) {
-      return `${num.toFixed(2)}x`;
-    }
-
-    // 🧮 Compact non-money numbers
-    if (Math.abs(num) >= 1e6) {
-      const abs = Math.abs(num);
-      const fmt = (v: number, s: string) =>
-        `${v >= 100 ? v.toFixed(0) : v >= 10 ? v.toFixed(1) : v.toFixed(2)}${s}`;
-      if (abs >= 1e12) return fmt(num / 1e12, isEuropean ? " Bio" : " T");
-      if (abs >= 1e9) return fmt(num / 1e9, isEuropean ? " Mrd" : " B");
-      if (abs >= 1e6) return fmt(num / 1e6, " M");
-    }
-
-    // 🔹 Default: locale-based numeric
-    return num.toLocaleString(undefined, {
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 2,
-    });
-  }
 
   // English: persist pinned list on change
   useEffect(() => {

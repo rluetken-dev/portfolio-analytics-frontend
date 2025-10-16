@@ -1,9 +1,11 @@
 // src/components/company/analytics/CashFlowSection.tsx
 import * as React from "react";
 import { SectionHeader, SectionGrid, MetricCard } from "./ui";
+import { useFormatDisplayValue } from "../../../utils/formatDisplayValue";
+import { CurrencyContext } from "../../../context/CurrencyContextObject";
 
-async function fetchMetricNumber(baseUrl: string, path: string, symbol: string, keys: string[]) {
-  const resp = await fetch(`${baseUrl}${path}?symbol=${encodeURIComponent(symbol)}`, {
+async function fetchMetricNumber(path: string, symbol: string, keys: string[]) {
+  const resp = await fetch(`${path}?symbol=${encodeURIComponent(symbol)}`, {
     headers: { Accept: "application/json" },
   });
   if (!resp.ok) return { value: null as number | null, status: resp.status };
@@ -17,37 +19,18 @@ async function fetchMetricNumber(baseUrl: string, path: string, symbol: string, 
   return { value: null as number | null, status: resp.status };
 }
 
-async function getUnit(sym: string) {
-  const resp = await fetch(
-    `http://localhost:5046/api/quotes/latest?symbol=${encodeURIComponent(sym)}&take=1`,
-    { headers: { Accept: "application/json" } },
-  );
-  if (!resp.ok) return "USD";
-  const j = await resp.json();
-  return typeof j?.unit === "string" ? j.unit : "USD";
-}
-
-// English: compact big number (K/M/B/T)
-function formatCompactNumber(n: number): string {
-  const abs = Math.abs(n);
-  const fmt = (v: number, s: string) =>
-    `${v >= 100 ? v.toFixed(0) : v >= 10 ? v.toFixed(1) : v.toFixed(2)}${s}`;
-  if (abs >= 1e12) return fmt(n / 1e12, "T");
-  if (abs >= 1e9) return fmt(n / 1e9, "B");
-  if (abs >= 1e6) return fmt(n / 1e6, "M");
-  if (abs >= 1e3) return fmt(n / 1e3, "K");
-  return abs >= 100 ? n.toFixed(0) : abs >= 10 ? n.toFixed(1) : n.toFixed(2);
-}
-
 export default function CashFlowSection({ symbol }: { symbol: string }) {
   const sym = (symbol ?? "").trim().toUpperCase();
-  const backendBase = React.useMemo(() => "http://localhost:5046", []);
+  const { formatDisplayValue } = useFormatDisplayValue();
 
   const [fcf, setFcf] = React.useState("—");
   const [oe, setOe] = React.useState("—");
+  const [baseValues, setBaseValues] = React.useState<{ fcf?: number; oe?: number }>({});
   const TOTAL = 2;
   const [count, setCount] = React.useState(`0/${TOTAL}`);
+  const { currency } = React.useContext(CurrencyContext)!;
 
+  // 🧩 Initial load
   React.useEffect(() => {
     let cancelled = false;
     async function run() {
@@ -55,22 +38,26 @@ export default function CashFlowSection({ symbol }: { symbol: string }) {
       setOe("—");
       setCount(`0/${TOTAL}`);
       if (!sym) return;
+
       try {
-        const unit = await getUnit(sym);
         const [fcfR, oeR] = await Promise.all([
-          fetchMetricNumber(backendBase, "/api/analytics/fcf", sym, ["value", "fcf"]),
-          fetchMetricNumber(backendBase, "/api/analytics/owner-earnings", sym, [
-            "value",
-            "ownerEarnings",
-          ]),
+          fetchMetricNumber("/api/analytics/fcf", sym, ["value", "fcf"]),
+          fetchMetricNumber("/api/analytics/owner-earnings", sym, ["value", "ownerEarnings"]),
         ]);
+
         if (cancelled) return;
 
         const fOk = Number.isFinite(fcfR.value as number);
         const oOk = Number.isFinite(oeR.value as number);
 
-        if (fOk) setFcf(`${formatCompactNumber(fcfR.value!)} ${unit}`);
-        if (oOk) setOe(`${formatCompactNumber(oeR.value!)} ${unit}`);
+        if (fOk) {
+          setBaseValues((p) => ({ ...p, fcf: fcfR.value! }));
+          setFcf(formatDisplayValue("FCF (abs)", fcfR.value!));
+        }
+        if (oOk) {
+          setBaseValues((p) => ({ ...p, oe: oeR.value! }));
+          setOe(formatDisplayValue("Owner Earnings", oeR.value!));
+        }
 
         setCount(`${(fOk ? 1 : 0) + (oOk ? 1 : 0)}/${TOTAL}`);
       } catch {
@@ -81,9 +68,17 @@ export default function CashFlowSection({ symbol }: { symbol: string }) {
     return () => {
       cancelled = true;
     };
-  }, [sym, backendBase]);
+  }, [sym]);
+
+  // 💱 Reformat when currency changes
+  React.useEffect(() => {
+    console.log(`[CashFlowSection] Reformat due to currency change → ${currency}`);
+    if (baseValues.fcf != null) setFcf(formatDisplayValue("FCF (abs)", baseValues.fcf));
+    if (baseValues.oe != null) setOe(formatDisplayValue("Owner Earnings", baseValues.oe));
+  }, [currency, baseValues, formatDisplayValue]);
 
   if (!sym) return null;
+
   return (
     <div>
       <SectionHeader title="Cash Flow & Owner Earnings" count={count} />

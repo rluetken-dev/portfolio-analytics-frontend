@@ -9,12 +9,11 @@ import { getLatestCloseFromQuotes } from "../../../services/api/quotes";
 
 // English: fetch a numeric metric from analytics endpoints with tolerant keys
 async function fetchMetricNumber(
-  baseUrl: string,
   path: string,
   symbol: string,
   candidateKeys: string[],
 ): Promise<{ value: number | null; status: number }> {
-  const resp = await fetch(`${baseUrl}${path}?symbol=${encodeURIComponent(symbol)}`, {
+  const resp = await fetch(`${path}?symbol=${encodeURIComponent(symbol)}`, {
     headers: { Accept: "application/json" },
   });
   if (!resp.ok) return { value: null, status: resp.status };
@@ -61,8 +60,6 @@ export default function ValuationSection({
 }) {
   const sym = (symbol ?? "").trim().toUpperCase();
 
-  const backendBase = React.useMemo(() => "http://localhost:5046", []);
-
   // English: display strings (render-ready)
   const [priceStr, setPriceStr] = React.useState("—");
   const [peStr, setPeStr] = React.useState("—");
@@ -89,13 +86,9 @@ export default function ValuationSection({
         // English: fetch valuation metrics in parallel
         const [price, peRes, pbRes, poeRes] = await Promise.all([
           getLatestCloseFromQuotes(sym),
-          fetchMetricNumber(backendBase, "/api/analytics/pe", sym, ["value", "pe"]),
-          fetchMetricNumber(backendBase, "/api/analytics/pb", sym, ["value", "pb"]),
-          fetchMetricNumber(backendBase, "/api/analytics/p-to-oe", sym, [
-            "value",
-            "pToOe",
-            "pOverOe",
-          ]),
+          fetchMetricNumber("/api/analytics/pe", sym, ["value", "pe"]),
+          fetchMetricNumber("/api/analytics/pb", sym, ["value", "pb"]),
+          fetchMetricNumber("/api/analytics/p-to-oe", sym, ["value", "pToOe", "pOverOe"]),
         ]);
         if (cancelled) return;
 
@@ -135,7 +128,8 @@ export default function ValuationSection({
     return () => {
       cancelled = true;
     };
-  }, [sym, backendBase, showPrice, showPE]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sym]);
 
   if (!sym) return null;
 

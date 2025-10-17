@@ -70,6 +70,7 @@ export default function CashFlowSection({ symbol }: { symbol: string }) {
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sym]);
 
   // 💱 Reformat when currency changes

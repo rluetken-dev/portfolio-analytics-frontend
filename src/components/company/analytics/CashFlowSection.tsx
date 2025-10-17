@@ -3,6 +3,7 @@ import * as React from "react";
 import { SectionHeader, SectionGrid, MetricCard } from "./ui";
 import { useFormatDisplayValue } from "../../../utils/formatDisplayValue";
 import { CurrencyContext } from "../../../context/CurrencyContextObject";
+import { useCurrencyFade } from "../../../hooks/useCurrencyFade";
 
 async function fetchMetricNumber(path: string, symbol: string, keys: string[]) {
   const resp = await fetch(`${path}?symbol=${encodeURIComponent(symbol)}`, {
@@ -22,6 +23,7 @@ async function fetchMetricNumber(path: string, symbol: string, keys: string[]) {
 export default function CashFlowSection({ symbol }: { symbol: string }) {
   const sym = (symbol ?? "").trim().toUpperCase();
   const { formatDisplayValue } = useFormatDisplayValue();
+  const { fadeClass } = useCurrencyFade();
 
   const [fcf, setFcf] = React.useState("—");
   const [oe, setOe] = React.useState("—");
@@ -83,8 +85,8 @@ export default function CashFlowSection({ symbol }: { symbol: string }) {
     <div>
       <SectionHeader title="Cash Flow & Owner Earnings" count={count} />
       <SectionGrid cols={2}>
-        <MetricCard label="FCF (abs)" value={fcf} />
-        <MetricCard label="Owner Earnings" value={oe} />
+        <MetricCard label="FCF (abs)" value={<span className={fadeClass}>{fcf}</span>} />
+        <MetricCard label="Owner Earnings" value={<span className={fadeClass}>{oe}</span>} />
       </SectionGrid>
     </div>
   );

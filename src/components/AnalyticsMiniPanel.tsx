@@ -8,6 +8,7 @@ import type { CurrentQuote } from "../services/api/quotes";
 import { CurrencyContext } from "../context/CurrencyContextObject";
 import type { CurrencyCode } from "../types/currency";
 import { useFormatDisplayValue } from "../utils/formatDisplayValue";
+import { useCurrencyFade } from "../hooks/useCurrencyFade";
 
 /**
  * Very small self-contained panel to show two metrics for a symbol:
@@ -199,6 +200,8 @@ export default function AnalyticsMiniPanel({
   initialSymbol?: string;
   onSymbolChange?: (s: string) => void;
 }) {
+  const { fadeClass } = useCurrencyFade(); // ✨ Smooth fade for currency changes
+
   // --- Core query & global UI state ---
   const [symbol, setSymbol] = useState<string>("");
 
@@ -1362,7 +1365,7 @@ export default function AnalyticsMiniPanel({
                         }}
                         title={m.hint ?? undefined}
                       >
-                        <span>{formatDisplayValue(m.label, m.value)}</span>
+                        <span className={fadeClass}>{formatDisplayValue(m.label, m.value)}</span>
 
                         {m.label === "Price" &&
                           live?.status === 200 &&

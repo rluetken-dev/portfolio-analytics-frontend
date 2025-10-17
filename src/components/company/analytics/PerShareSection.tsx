@@ -3,6 +3,7 @@ import * as React from "react";
 import { SectionHeader, SectionGrid, MetricCard } from "./ui";
 import { useFormatDisplayValue } from "../../../utils/formatDisplayValue";
 import { CurrencyContext } from "../../../context/CurrencyContextObject";
+import { useCurrencyFade } from "../../../hooks/useCurrencyFade";
 
 /* -------------------------------------------------------
    Helper: fetch numeric metric (proxy-ready, safe)
@@ -53,6 +54,7 @@ export default function PerShareSection({ symbol }: { symbol: string }) {
 
   const { currency } = React.useContext(CurrencyContext)!;
   const { formatDisplayValue } = useFormatDisplayValue();
+  const { fadeClass } = useCurrencyFade();
 
   const [eps, setEps] = React.useState("—");
   const [bvps, setBvps] = React.useState("—");
@@ -133,9 +135,9 @@ export default function PerShareSection({ symbol }: { symbol: string }) {
     <div>
       <SectionHeader title="Per Share" count={count} />
       <SectionGrid cols={3}>
-        <MetricCard label="EPS" value={eps} />
-        <MetricCard label="BVPS" value={bvps} />
-        <MetricCard label="OEPS" value={oeps} />
+        <MetricCard label="EPS" value={<span className={fadeClass}>{eps}</span>} />
+        <MetricCard label="BVPS" value={<span className={fadeClass}>{bvps}</span>} />
+        <MetricCard label="OEPS" value={<span className={fadeClass}>{oeps}</span>} />
       </SectionGrid>
     </div>
   );

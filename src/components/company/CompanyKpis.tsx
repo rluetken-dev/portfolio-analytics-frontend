@@ -1,10 +1,14 @@
 // src/components/company/CompanyKpis.tsx
 import * as React from "react";
 import { getLatestCloseFromQuotes } from "../../services/api/quotes";
+import { useFormatDisplayValue } from "../../utils/formatDisplayValue";
+import { CurrencyContext } from "../../context/CurrencyContextObject";
+import { useCurrencyFade } from "../../hooks/useCurrencyFade";
 
+// 🧩 Type for KPI items
 type Metric = { label: string; value: string; hint?: string };
 
-// Small helper to fetch a numeric value from /api/analytics/*
+// 🧩 Helper to fetch numeric values
 async function fetchMetricNumber(
   baseUrl: string,
   path: string,
@@ -25,14 +29,12 @@ async function fetchMetricNumber(
   return { value: null, status: resp.status };
 }
 
-// Formatters
+// 🧩 Formatters (non-currency values)
 const asRatio = (v: number | null) => (v == null || Number.isNaN(v) ? "n/a" : `${v.toFixed(2)}x`);
 const asPct = (v: number | null) =>
   v == null || Number.isNaN(v) ? "n/a" : `${(v * 100).toFixed(1)}%`;
-const asMoney = (v: number | null, unit?: string) =>
-  v == null || Number.isNaN(v) ? "n/a" : `${v.toFixed(2)}${unit ? ` ${unit}` : ""}`;
 
-// Simple card UI
+// 🧩 Simple card UI
 const card: React.CSSProperties = {
   border: "1px solid #333",
   borderRadius: 10,
@@ -48,10 +50,17 @@ const grid: React.CSSProperties = {
 export default function CompanyKpis({ symbol }: { symbol: string }) {
   const sym = (symbol ?? "").trim().toUpperCase();
   const backendBase = React.useMemo(() => "http://localhost:5046", []);
+  const { fadeClass } = useCurrencyFade();
 
-  const [loading, setLoading] = React.useState<boolean>(true);
+  // 🧩 Currency context and formatter
+  const { currency } = React.useContext(CurrencyContext)!;
+  const { formatDisplayValue } = useFormatDisplayValue();
+
+  // 🧩 Component state
+  const [loading, setLoading] = React.useState(true);
   const [err, setErr] = React.useState<string | null>(null);
   const [metrics, setMetrics] = React.useState<Metric[]>([]);
+  const [basePrice, setBasePrice] = React.useState<number | null>(null);
 
   React.useEffect(() => {
     let aborted = false;
@@ -83,10 +92,19 @@ export default function CompanyKpis({ symbol }: { symbol: string }) {
 
         if (aborted) return;
 
+        // 🧩 Store base price for reformatting
+        if (price.value != null && Number.isFinite(price.value)) {
+          setBasePrice(price.value);
+        }
+
+        // 🧩 Use formatDisplayValue for currency-aware display
+        const formattedPrice =
+          price.value != null ? formatDisplayValue("Price", price.value) : "n/a";
+
         const kpis: Metric[] = [
           {
             label: "Price",
-            value: asMoney(price.value ?? null, price.unit),
+            value: formattedPrice,
             hint:
               price.status === 200
                 ? price.asOf
@@ -94,31 +112,11 @@ export default function CompanyKpis({ symbol }: { symbol: string }) {
                   : undefined
                 : `HTTP ${price.status}`,
           },
-          {
-            label: "P/E",
-            value: asRatio(peRes.value),
-            hint: peRes.status === 200 ? undefined : `HTTP ${peRes.status}`,
-          },
-          {
-            label: "ROE",
-            value: asPct(roeRes.value),
-            hint: roeRes.status === 200 ? undefined : `HTTP ${roeRes.status}`,
-          },
-          {
-            label: "Net Margin",
-            value: asPct(nmRes.value),
-            hint: nmRes.status === 200 ? undefined : `HTTP ${nmRes.status}`,
-          },
-          {
-            label: "FCF Yield",
-            value: asPct(fcfyRes.value),
-            hint: fcfyRes.status === 200 ? undefined : `HTTP ${fcfyRes.status}`,
-          },
-          {
-            label: "Debt/Equity",
-            value: asRatio(dteRes.value),
-            hint: dteRes.status === 200 ? undefined : `HTTP ${dteRes.status}`,
-          },
+          { label: "P/E", value: asRatio(peRes.value) },
+          { label: "ROE", value: asPct(roeRes.value) },
+          { label: "Net Margin", value: asPct(nmRes.value) },
+          { label: "FCF Yield", value: asPct(fcfyRes.value) },
+          { label: "Debt/Equity", value: asRatio(dteRes.value) },
         ];
 
         setMetrics(kpis);
@@ -134,7 +132,25 @@ export default function CompanyKpis({ symbol }: { symbol: string }) {
     return () => {
       aborted = true;
     };
-  }, [sym, backendBase]);
+  }, [sym, backendBase, formatDisplayValue]);
+
+  /* -------------------------------------------------------
+   💱 Reformat price after fade-out (for smooth transition)
+  ------------------------------------------------------- */
+  React.useEffect(() => {
+    if (basePrice == null) return;
+
+    // Wait until fade-out completes before reformatting
+    const timeout = setTimeout(() => {
+      setMetrics((prev) =>
+        prev.map((m) =>
+          m.label === "Price" ? { ...m, value: formatDisplayValue("Price", basePrice) } : m,
+        ),
+      );
+    }, 150); // half the fade duration
+
+    return () => clearTimeout(timeout);
+  }, [currency, basePrice, formatDisplayValue]);
 
   if (!sym) return null;
 
@@ -143,12 +159,7 @@ export default function CompanyKpis({ symbol }: { symbol: string }) {
       <h2 style={{ margin: "0 0 8px 0", fontSize: 16, opacity: 0.9 }}>Key Metrics</h2>
       {err && <div style={{ marginBottom: 8, fontSize: 12, color: "#f87171" }}>{err}</div>}
       <div style={grid}>
-        {/*
-          English: always iterate over indices; when loading, show 6 skeleton cards.
-          This avoids 'm' being inferred as unknown/undefined.
-        */}
         {Array.from({ length: loading ? 6 : metrics.length }).map((_, i) => {
-          // English: when not loading, pick the typed metric for this index
           const m: Metric | null = loading ? null : (metrics[i] ?? null);
 
           return (
@@ -171,6 +182,7 @@ export default function CompanyKpis({ symbol }: { symbol: string }) {
                   <div style={{ fontSize: 11, opacity: 0.7 }}>{m?.label}</div>
                   <div
                     title={m?.hint}
+                    className={m?.label === "Price" ? fadeClass : ""}
                     style={{
                       fontSize: 18,
                       fontWeight: 600,

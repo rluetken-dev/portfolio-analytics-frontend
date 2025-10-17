@@ -1,5 +1,6 @@
 // src/App.tsx
 import { Routes, Route } from "react-router-dom";
+import "./styles/currencyFade.css";
 
 // Import pages
 import Home from "./pages/Home";

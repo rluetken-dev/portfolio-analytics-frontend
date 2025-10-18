@@ -11,7 +11,7 @@ export default function CompanyHeader({ symbol }: { symbol: string }) {
   const [loading, setLoading] = React.useState<boolean>(true);
   const [err, setErr] = React.useState<string | null>(null);
 
-  const backendBase = React.useMemo(() => "http://localhost:5046", []);
+  const backendBase = import.meta.env.VITE_API_BASE_URL || "";
 
   React.useEffect(() => {
     let aborted = false;

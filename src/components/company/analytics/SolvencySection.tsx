@@ -42,7 +42,7 @@ export default function SolvencySection({
   showDebtToEquity?: boolean;
 }) {
   const sym = (symbol ?? "").trim().toUpperCase();
-  const backendBase = React.useMemo(() => "http://localhost:5046", []);
+  const backendBase = import.meta.env.VITE_API_BASE_URL || "";
 
   // English: display strings
   const [dte, setDte] = React.useState("—");

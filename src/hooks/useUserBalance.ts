@@ -1,7 +1,7 @@
 // src/hooks/useUserBalance.ts
-import { useState, useEffect, useContext } from "react";
+import { useState, useEffect, useContext, useCallback } from "react";
 import { AuthContext } from "../context/auth-context";
-import { getAccessToken } from "../utils/token"; // ✅ import token getter
+import { getAccessToken } from "../utils/token";
 
 interface UserBalanceResponse {
   username: string;
@@ -19,6 +19,30 @@ export function useUserBalance() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // ✅ shared fetch logic
+  const fetchBalance = useCallback(async () => {
+    const token = getAccessToken();
+    if (!token) return;
+
+    setLoading(true);
+    try {
+      const res = await fetch("/api/User/balance", {
+        method: "GET",
+        credentials: "include",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data: UserBalanceResponse = await res.json();
+      setBalance(data.cashBalance);
+      setError(null);
+    } catch (err) {
+      console.error("❌ Error fetching balance:", err);
+      setError("Failed to load balance");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (!isAuthenticated || !user) {
       setBalance(null);
@@ -26,42 +50,12 @@ export function useUserBalance() {
     }
 
     const delay = setTimeout(() => {
-      const fetchBalance = async () => {
-        const token = getAccessToken(); // ✅ get in-memory JWT
-        if (!token) {
-          console.warn("No access token available, skipping balance fetch.");
-          return;
-        }
-
-        setLoading(true);
-        try {
-          const res = await fetch("/api/User/balance", {
-            method: "GET",
-            credentials: "include",
-            headers: {
-              Authorization: `Bearer ${token}`, // ✅ include JWT
-            },
-          });
-
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          const data: UserBalanceResponse = await res.json();
-
-          console.log("✅ useUserBalance fetched:", data);
-          setBalance(data.cashBalance);
-          setError(null);
-        } catch (err) {
-          console.error("❌ Error fetching balance:", err);
-          setError("Failed to load balance");
-        } finally {
-          setLoading(false);
-        }
-      };
-
-      fetchBalance();
+      void fetchBalance();
     }, 250);
 
     return () => clearTimeout(delay);
-  }, [isAuthenticated, user]);
+  }, [isAuthenticated, user, fetchBalance]);
 
-  return { balance, loading, error };
+  // ✅ Return now includes manual refresh function
+  return { balance, loading, error, refreshBalance: fetchBalance };
 }

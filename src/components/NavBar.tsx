@@ -14,8 +14,8 @@ import { AuthContext } from "../context/auth-context";
  * - Global currency switcher with persistent state
  */
 export default function NavBar() {
-  const { pathname } = useLocation();
-  const { currency, setCurrency } = useCurrency();
+  const { pathname } = useLocation();  
+  const { currency, setCurrency, formatMoneyFrom } = useCurrency();
   const { balance } = useUserBalance();
 
   // Access AuthContext safely to avoid undefined errors
@@ -122,12 +122,8 @@ export default function NavBar() {
           }}
           title="Current cash balance"
         >
-          💰{" "}
-          {balance.toLocaleString(undefined, {
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2,
-          })}{" "}
-          {currency}
+          {/* 💰 Format balance according to selected currency */}
+          💰 {formatMoneyFrom(balance, "USD")}
         </div>
       )}
 

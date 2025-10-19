@@ -3,6 +3,9 @@ import { Link, useLocation, useMatch } from "react-router-dom";
 import { AuthBadge } from "./AuthBadge";
 import { useCurrency } from "../hooks/useCurrency";
 import type { CurrencyCode } from "../types/currency";
+import { useUserBalance } from "../hooks/useUserBalance";
+import { useContext } from "react";
+import { AuthContext } from "../context/auth-context";
 
 /**
  * Top navigation bar.
@@ -13,6 +16,14 @@ import type { CurrencyCode } from "../types/currency";
 export default function NavBar() {
   const { pathname } = useLocation();
   const { currency, setCurrency } = useCurrency();
+  const { balance } = useUserBalance();
+
+  // Access AuthContext safely to avoid undefined errors
+  const auth = useContext(AuthContext);
+  if (!auth) {
+    throw new Error("NavBar must be used within an AuthProvider");
+  }
+  const { isAuthenticated } = auth;
 
   // --- Dropdown logic for currency menu ---
   const [open, setOpen] = useState(false);
@@ -96,6 +107,27 @@ export default function NavBar() {
           >
             Company: {sym}
           </Link>
+        </div>
+      )}
+
+      {/* 💰 Show balance when logged in */}
+      {isAuthenticated && balance !== null && (
+        <div
+          style={{
+            color: "#22c55e",
+            fontSize: 13,
+            fontWeight: 500,
+            marginRight: "1rem",
+            whiteSpace: "nowrap",
+          }}
+          title="Current cash balance"
+        >
+          💰{" "}
+          {balance.toLocaleString(undefined, {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+          })}{" "}
+          {currency}
         </div>
       )}
 

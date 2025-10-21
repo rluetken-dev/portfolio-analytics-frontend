@@ -1192,6 +1192,7 @@ export default function Companies() {
               await withdraw(totalValue);
             } else if (data.shares < 0) {
               // 💰 Deposit on sell
+              
               await deposit(totalValue);
             }
             

@@ -17,6 +17,8 @@ export type CurrencyContextType = {
   rates: Record<string, number>;
   formatMoney: (amount: number, from?: CurrencyCode) => string;
   formatMoneyFrom: (amount: number, from: CurrencyCode) => string;
+  convertToUSD: (amount: number) => number;       
+  convertFromUSD: (amount: number) => number;     
 };
 
 // ---------------- Provider ----------------
@@ -60,6 +62,18 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
     return formatMoneyDynamic(amount, from, currency);
   };
 
+  // Converts any amount from the current user currency to USD
+  const convertToUSD = (amount: number): number => {
+    if (currency === "USD") return amount;
+    return convertCurrency(amount, currency, "USD");
+  };
+
+  // Converts any amount from USD to the current user currency (for display)
+  const convertFromUSD = (amount: number): number => {
+    if (currency === "USD") return amount;
+    return convertCurrency(amount, "USD", currency);
+  };
+
   return (
     <CurrencyContext.Provider
       value={{
@@ -67,7 +81,9 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
         setCurrency,
         rates,
         formatMoney,
-        formatMoneyFrom, // ✅ neu hinzugefügt
+        formatMoneyFrom, 
+        convertToUSD,   
+        convertFromUSD, 
       }}
     >
       {children}

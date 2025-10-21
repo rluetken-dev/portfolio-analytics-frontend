@@ -6,7 +6,7 @@ import type { CurrencyCode } from "../types/currency";
 import { useUserBalance } from "../hooks/useUserBalance";
 import { useContext } from "react";
 import { AuthContext } from "../context/auth-context";
-import { deposit, withdraw } from "../services/api/userBalance";
+import { FundsPanel } from "./FundsPanel";
 
 /**
  * Top navigation bar.
@@ -30,6 +30,7 @@ export default function NavBar() {
   const [open, setOpen] = useState(false);
   const [isAnimating, setIsAnimating] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const fundsRef = useRef<HTMLDetailsElement>(null);
 
   useEffect(() => {
     if (open) {
@@ -128,203 +129,48 @@ export default function NavBar() {
         </div>
       )}
 
-      {/* 💸 Deposit / Withdraw Controls */}
-      {isAuthenticated && (
-        <div style={{ position: "relative", marginRight: "1rem" }}>
-          <details
-            onToggle={(e) => {
-              // clear all inputs when panel closes
-              const details = e.currentTarget;
-              if (!details.open) {
-                const inputs = details.querySelectorAll("input");
-                const errors = details.querySelectorAll(".error-box");
-                inputs.forEach((i) => (i.value = ""));
-                errors.forEach((e) => (e.textContent = ""));
-              }
+     {/* 💸 Deposit / Withdraw Controls */}
+    {isAuthenticated && (
+      <div style={{ position: "relative", marginRight: "1rem" }}>
+        {/* Ref gehört hierher, nicht auf das äußere div */}
+        <details ref={fundsRef}>
+          <summary
+            style={{
+              cursor: "pointer",
+              fontSize: 13,
+              color: "#22c55e",
+              userSelect: "none",
             }}
           >
-            <summary
-              style={{
-                cursor: "pointer",
-                fontSize: 13,
-                color: "#22c55e",
-                userSelect: "none",
-              }}
-            >
-              ⚙️ Funds
-            </summary>
+            ⚙️ Funds
+          </summary>
 
-            <div
-              style={{
-                position: "absolute",
-                right: 0,
-                top: "100%",
-                background: "#1e1e1e",
-                border: "1px solid #333",
-                borderRadius: 8,
-                padding: "8px 10px",
-                marginTop: 4,
-                zIndex: 99,
-                minWidth: 180,
-              }}
-            >
-              {/* 💰 Deposit Form */}
-              <form
-                onSubmit={async (e) => {
-                  e.preventDefault();
-                  const form = e.currentTarget;
-                  const input = form.querySelector("input") as HTMLInputElement;
-                  const errorBox = form.querySelector(".error-box") as HTMLDivElement;
-                  const raw = input.value.trim();
-                  const amount = parseFloat(raw);
+          <div
+            style={{
+              position: "absolute",
+              right: 0,
+              top: "100%",
+              background: "#1e1e1e",
+              border: "1px solid #333",
+              borderRadius: 8,
+              padding: "10px",
+              marginTop: 4,
+              zIndex: 99,
+              minWidth: 220,
+              display: "flex",
+              flexDirection: "column",
+              gap: 6,
+            }}
+          >
+            <FundsPanel
+              currencySymbol={formatMoneyFrom(0, currency).replace(/[\d.,]/g, "").trim() || "$"}
+              refreshBalance={refreshBalance}
+            />
+          </div>
+        </details>
+      </div>
+    )}
 
-                  errorBox.textContent = "";
-
-                  if (!raw || isNaN(amount) || amount <= 0) {
-                    errorBox.textContent = "❌ Please enter a valid positive amount.";
-                    return;
-                  }
-
-                  try {
-                    const res = await deposit(amount);
-                    console.log("✅ Deposit successful:", res);
-                    input.value = "";
-                    refreshBalance();
-                  } catch (err) {
-                    if (err instanceof Error) {
-                      console.error("Deposit failed:", err.message);
-                      errorBox.textContent = "❌ Deposit failed – please try again later.";
-                    } else {
-                      console.error("Unknown error during deposit:", err);
-                      errorBox.textContent = "❌ Unexpected error occurred.";
-                    }
-                  }
-                }}
-                style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 8 }}
-              >
-                <div style={{ display: "flex", gap: 4 }}>
-                  <input
-                    type="number"
-                    step="0.01"
-                    placeholder="Amount"
-                    min="0"
-                    style={{
-                      flex: 1,
-                      background: "#111",
-                      color: "white",
-                      border: "1px solid #444",
-                      borderRadius: 6,
-                      padding: "2px 6px",
-                    }}
-                  />
-                  <button
-                    type="submit"
-                    style={{
-                      background: "#22c55e",
-                      color: "black",
-                      border: "none",
-                      borderRadius: 6,
-                      padding: "2px 8px",
-                      cursor: "pointer",
-                      fontWeight: 600,
-                    }}
-                  >
-                    +💰
-                  </button>
-                </div>
-                <div
-                  className="error-box"
-                  style={{
-                    minHeight: "1em",
-                    fontSize: 12,
-                    color: "#f87171",
-                    marginTop: 2,
-                  }}
-                ></div>
-              </form>
-
-              {/* 💸 Withdraw Form */}
-              <form
-                onSubmit={async (e) => {
-                  e.preventDefault();
-                  const form = e.currentTarget;
-                  const input = form.querySelector("input") as HTMLInputElement;
-                  const errorBox = form.querySelector(".error-box") as HTMLDivElement;
-                  const raw = input.value.trim();
-                  const amount = parseFloat(raw);
-
-                  errorBox.textContent = "";
-
-                  if (!raw || isNaN(amount) || amount <= 0) {
-                    errorBox.textContent = "❌ Please enter a valid positive amount.";
-                    return;
-                  }
-
-                  try {
-                    const res = await withdraw(amount);
-                    console.log("✅ Withdraw successful:", res);
-                    input.value = "";
-                    refreshBalance();
-                  } catch (err) {
-                    if (err instanceof Error) {
-                      console.error("Withdraw failed:", err.message);
-                      if (err.message.includes("400")) {
-                        errorBox.textContent = "❌ Insufficient funds – check your balance.";
-                      } else {
-                        errorBox.textContent = "❌ Withdrawal failed – please try again.";
-                      }
-                    } else {
-                      console.error("Unknown error during withdrawal:", err);
-                      errorBox.textContent = "❌ Unexpected error occurred.";
-                    }
-                  }
-                }}
-                style={{ display: "flex", flexDirection: "column", gap: 4 }}
-              >
-                <div style={{ display: "flex", gap: 4 }}>
-                  <input
-                    type="number"
-                    step="0.01"
-                    placeholder="Amount"
-                    min="0"
-                    style={{
-                      flex: 1,
-                      background: "#111",
-                      color: "white",
-                      border: "1px solid #444",
-                      borderRadius: 6,
-                      padding: "2px 6px",
-                    }}
-                  />
-                  <button
-                    type="submit"
-                    style={{
-                      background: "#f87171",
-                      color: "black",
-                      border: "none",
-                      borderRadius: 6,
-                      padding: "2px 8px",
-                      cursor: "pointer",
-                      fontWeight: 600,
-                    }}
-                  >
-                    −💸
-                  </button>
-                </div>
-                <div
-                  className="error-box"
-                  style={{
-                    minHeight: "1em",
-                    fontSize: 12,
-                    color: "#f87171",
-                    marginTop: 2,
-                  }}
-                ></div>
-              </form>
-            </div>
-          </details>
-        </div>
-      )}
 
       {/* 💱 Currency Switcher Button */}
       <div ref={dropdownRef} style={{ position: "relative", marginRight: "1rem" }}>

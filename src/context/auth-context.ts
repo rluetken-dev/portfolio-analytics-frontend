@@ -6,7 +6,8 @@ export interface AuthContextType {
   isAuthenticated: boolean;
   login: (username: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
+  balance: number | null;
+  setBalance: (value: number | null) => void;
 }
 
-// Create the AuthContext (default undefined, will be set by AuthProvider)
 export const AuthContext = createContext<AuthContextType | undefined>(undefined);

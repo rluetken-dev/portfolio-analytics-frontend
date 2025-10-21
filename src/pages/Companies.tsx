@@ -9,6 +9,7 @@ import Notification from "../components/Notification";
 import ConfirmDialog from "../components/ConfirmDialog";
 import EditCompanyDialog from "../components/EditCompanyDialog";
 import InlineToast from "../components/InlineToast";
+import { useUserBalance } from "../hooks/useUserBalance";
 
 //import { getCurrentPrice } from "../services/api/quotes";
 
@@ -198,6 +199,7 @@ export default function Companies() {
   const [limit, setLimit] = useState<number>(25); // EN: adjustable server page size
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [toastType, setToastType] = useState<"success" | "error" | "info">("success");
+  const { cashBalance, deposit, withdraw, refreshBalance } = useUserBalance();
 
   const [sectorFilter, setSectorFilter] = useState<string>("All"); // EN: Sector filter (All = no filter)
 
@@ -1126,7 +1128,7 @@ export default function Companies() {
           currentShares={buyDialogCompany.shares ?? 0}
           onCancel={() => setBuyDialogCompany(null)}
           onConfirm={async (data) => {
-            // 🧱 Define DTO for response typing
+            // Type definition for the backend response
             interface TransactionDto {
               createdAt: string;
               shares: number;
@@ -1135,18 +1137,44 @@ export default function Companies() {
             }
 
             try {
+              // 🧮 Determine the final price (fallback to null if invalid)
               const finalPrice =
                 data.purchasePrice && data.purchasePrice > 0 ? data.purchasePrice : null;
 
-              // ✅ Use typed fetchJson<TResponse, TBody>
+              // 💰 Calculate the total transaction value (absolute)
+              const totalValue =
+                data.shares > 0
+                  ? data.shares * (finalPrice ?? 0)
+                  : Math.abs(data.shares) * (finalPrice ?? 0);
+
+              // 🧠 Safety guard: skip insufficient check if cashBalance not loaded
+              if (cashBalance == null) {
+                console.warn("⚠️ cashBalance is null at trade time — skipping insufficient check");
+              } else if (data.shares > 0) {
+                // 🧮 Recheck balance right before withdraw to avoid stale state
+                console.group("💰 TRADE DEBUG");
+                console.log("cashBalance (context):", cashBalance);
+                await refreshBalance();
+                console.log("cashBalance (after refresh):", cashBalance);
+                console.log("totalValue (to withdraw):", totalValue);
+                console.log("symbol:", buyDialogCompany.symbol);
+                console.groupEnd();
+
+                // 🔎 Fetch latest value from context
+                const latestBalance = cashBalance ?? 0;
+
+                // ⚠️ Apply small epsilon for rounding safety
+                if (totalValue > latestBalance + 0.0001) {
+                  setToastType("error");
+                  setToastMsg("Insufficient funds (updated check).");
+                  return;
+                }
+              }
+
+              // 🧾 Step 1: Create transaction via backend API
               const result = await fetchJson<
                 TransactionDto,
-                {
-                  symbol: string;
-                  shares: number;
-                  price: number | null;
-                  notes: string;
-                }
+                { symbol: string; shares: number; price: number | null; notes: string }
               >({
                 path: "/api/UserCompanyTransactions",
                 method: "POST",
@@ -1158,7 +1186,23 @@ export default function Companies() {
                 },
               });
 
-              // ✅ Success feedback
+             // 🪙 Step 2: Update balance via frontend (since backend does NOT handle cash update)
+            if (data.shares > 0) {
+              // 💸 Withdraw on buy
+              await withdraw(totalValue);
+            } else if (data.shares < 0) {
+              // 💰 Deposit on sell
+              await deposit(totalValue);
+            }
+            
+              // 🕒 Give backend a short moment to commit transaction before refreshing balance
+              await new Promise((r) => setTimeout(r, 200));
+
+
+              // 🔄 Step 3: Refresh balance to sync global state
+              await refreshBalance();
+
+              // ✅ Step 4: Display success feedback
               const action = data.shares > 0 ? "Bought" : "Sold";
               const shareCount = Math.abs(data.shares);
               const priceText = result.price ? `$${result.price.toFixed(2)}` : "unknown price";
@@ -1167,43 +1211,23 @@ export default function Companies() {
               setToastType("success");
               setToastMsg(message);
             } catch (error: unknown) {
-              console.error("🔥 API Transaction Error:", error);
+              console.error("🔥 Trade Error:", error);
 
-              // Default fallback message
+              // 🧩 Robust error mapping
               let message = "Transaction failed.";
+              if (typeof error === "string") message = error;
+              else if (error instanceof Error) message = error.message;
 
-              // 🧩 Type-safe extraction of message
-              if (typeof error === "string") {
-                message = error;
-              } else if (error instanceof Error) {
-                message = error.message;
-              } else if (
-                error !== null &&
-                typeof error === "object" &&
-                "message" in error &&
-                typeof (error as Record<string, unknown>).message === "string"
-              ) {
-                message = (error as Record<string, unknown>).message as string;
-              }
-
-              // 🧠 Map backend messages to user-friendly texts
-              if (message.includes("Insufficient shares")) {
-                message = "You cannot sell more shares than you currently own.";
-              } else if (message.includes("Unauthorized")) {
-                message = "Your session has expired. Please log in again.";
-              } else if (message.includes("not found")) {
-                message = "The requested company could not be found.";
-              }
-
-              // 🔴 Show styled error toast
               setToastType("error");
               setToastMsg(message);
             } finally {
+              // 🧼 Always close the dialog
               setBuyDialogCompany(null);
             }
           }}
         />
       )}
+
       {toastMsg && (
         <InlineToast message={toastMsg} type={toastType} onClose={() => setToastMsg(null)} />
       )}

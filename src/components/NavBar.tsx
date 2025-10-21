@@ -17,7 +17,7 @@ import { deposit, withdraw } from "../services/api/userBalance";
 export default function NavBar() {
   const { pathname } = useLocation();
   const { currency, setCurrency, formatMoneyFrom } = useCurrency();
-  const { balance, refreshBalance } = useUserBalance();
+  const { cashBalance, refreshBalance } = useUserBalance();
 
   // Access AuthContext safely to avoid undefined errors
   const auth = useContext(AuthContext);
@@ -112,7 +112,7 @@ export default function NavBar() {
       )}
 
       {/* 💰 Show balance when logged in */}
-      {isAuthenticated && balance !== null && (
+      {isAuthenticated && cashBalance !== null && (
         <div
           style={{
             color: "#22c55e",
@@ -124,7 +124,7 @@ export default function NavBar() {
           title="Current cash balance"
         >
           {/* 💰 Format balance according to selected currency */}
-          💰 {formatMoneyFrom(balance, "USD")}
+          💰 {formatMoneyFrom(cashBalance, "USD")}
         </div>
       )}
 

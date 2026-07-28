@@ -48,7 +48,7 @@ export default function ProfitabilitySection({
   const sym = (symbol ?? "").trim().toUpperCase();
 
   // English: keep base stable (do not depend on sym)
-  const backendBase = React.useMemo(() => "http://localhost:5046", []);
+  const backendBase = React.useMemo(() => "", []);
 
   // English: display-ready strings for each metric
   const [roeStr, setRoeStr] = React.useState("—");

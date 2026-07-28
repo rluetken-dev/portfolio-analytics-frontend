@@ -22,7 +22,7 @@ export async function getLatestCloseFromQuotes(symbol: string): Promise<LatestMe
   }
 
   try {
-    const url = `http://localhost:5046/api/quotes/latest?symbol=${encodeURIComponent(sym)}&take=1`;
+    const url = `/api/quotes/latest?symbol=${encodeURIComponent(sym)}&take=1`;
     const resp = await fetch(url, { method: "GET", headers: { Accept: "application/json" } });
 
     if (!resp.ok) {
@@ -100,7 +100,7 @@ export async function refreshQuotes(symbols: string, range = "24m"): Promise<Ref
   const list = (symbols ?? "").trim();
   if (!list) throw new Error("No symbols");
 
-  const url = `http://localhost:5046/api/quotes/refresh?symbols=${encodeURIComponent(
+  const url = `/api/quotes/refresh?symbols=${encodeURIComponent(
     list,
   )}&range=${encodeURIComponent(range)}`;
 
@@ -131,7 +131,7 @@ export async function getCurrentPrice(symbol: string): Promise<CurrentQuote> {
   if (!sym) return { symbol: sym, price: null, status: 400, error: "Symbol required" };
 
   try {
-    const url = `http://localhost:5046/api/quotes/current?symbol=${encodeURIComponent(sym)}`;
+    const url = `/api/quotes/current?symbol=${encodeURIComponent(sym)}`;
     const resp = await fetch(url, { headers: { Accept: "application/json" } });
 
     if (!resp.ok) {

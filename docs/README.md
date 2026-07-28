@@ -9,7 +9,7 @@ For a quick overview and badges, see the root [README.md](./README.md).
 
 - **Purpose:** Modern React/Vite app for exploring companies, fetching & visualizing analytics, and managing watchlists.
 - **UX:** Clear, compact **status messages**; graceful handling of free‑tier and rate‑limit constraints.
-- **Integration:** Connects to the .NET backend at `VITE_API_URL` (default `http://localhost:5179`).
+- **Integration:** Uses `VITE_API_BASE=/api` and the Vite dev proxy to connect to the .NET backend.
 
 ## Key Features
 
@@ -92,14 +92,14 @@ src/
 Create `.env.development`:
 
 ```env
-VITE_API_URL=http://localhost:5179
+VITE_API_BASE=/api
 VITE_APP_TITLE="Portfolio Analytics"
 ```
 
 Ports:
 
 - **Frontend dev**: `http://localhost:5173`
-- **Backend**: `http://localhost:5179` (Swagger at `/swagger`)
+- **Backend**: `http://localhost:5046` (Swagger at `/swagger`)
 
 ## Scripts
 
@@ -179,8 +179,8 @@ The test simulates cases (200/400/404/402/429/5xx incl. embedded hints) and chec
 
 ## Docs & Links
 
-- **Backend Swagger:** http://localhost:5179/swagger
-- **Analytics endpoints (backend doc):** ../backend/docs/analytics-endpoints.md
+- **Backend Swagger:** http://localhost:5046/swagger
+- **Backend repository:** https://github.com/rluetken-dev/portfolio-analytics-backend
 - **Commit conventions:** https://www.conventionalcommits.org/
 
 ## License & Author

@@ -26,7 +26,7 @@ npm install
 
 # environment (dev)
 cp .env.example .env.development
-# Edit .env.development (default API: http://localhost:5179)
+# Optional: create .env.development and set the API proxy base
 
 npm run dev
 # open http://localhost:5173
@@ -47,7 +47,7 @@ npm run test:status  # status message smoke tests
 ## 🔐 Environment
 
 ```env
-VITE_API_URL=http://localhost:5179
+VITE_API_BASE=/api
 VITE_APP_TITLE="Portfolio Analytics"
 ```
 
@@ -82,9 +82,9 @@ npm run test:status
 
 ## 📖 Documentation
 
-- **Detailed guide**: [README.md](./docs/README.md)
-- **Backend Swagger**: http://localhost:5179/swagger
-- **Analytics endpoints**: ../backend/docs/analytics-endpoints.md
+- **Detailed guide**: [docs/README.md](./docs/README.md)
+- **Backend Swagger**: http://localhost:5046/swagger
+- **Backend repository**: [portfolio-analytics-backend](https://github.com/rluetken-dev/portfolio-analytics-backend)
 - **Commit conventions**: https://www.conventionalcommits.org/
 
 ---

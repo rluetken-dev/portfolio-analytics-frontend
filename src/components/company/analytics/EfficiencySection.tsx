@@ -24,7 +24,7 @@ const fmtRatio = (v: number | null | undefined) =>
 
 export default function EfficiencySection({ symbol }: { symbol: string }) {
   const sym = (symbol ?? "").trim().toUpperCase();
-  const backendBase = React.useMemo(() => "http://localhost:5046", []);
+  const backendBase = React.useMemo(() => "", []);
 
   const [at, setAt] = React.useState("—");
   const [cagr, setCagr] = React.useState("—");

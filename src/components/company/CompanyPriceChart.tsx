@@ -115,7 +115,7 @@ async function fetchTimeseries(
 
 export default function CompanyPriceChart({ symbol, range, onRangeChange }: Props) {
   const sym = (symbol ?? "").trim().toUpperCase();
-  const backendBase = import.meta.env.VITE_API_BASE_URL || "";
+  const backendBase = "";
 
   const { currency, formatMoneyFrom } = useContext(CurrencyContext)!;
 

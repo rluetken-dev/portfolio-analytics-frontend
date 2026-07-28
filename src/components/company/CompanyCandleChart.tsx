@@ -145,7 +145,7 @@ async function fetchOhlc(baseUrl: string, symbol: string, fromISO?: string, toIS
 ========================================================= */
 export default function CompanyCandleChart({ symbol, range, height = 260 }: Props) {
   const sym = symbol?.trim().toUpperCase();
-  const backendBase = import.meta.env.VITE_API_BASE_URL || "";
+  const backendBase = "";
 
   const { currency, formatMoneyFrom } = useContext(CurrencyContext)!;
 

@@ -49,7 +49,7 @@ const grid: React.CSSProperties = {
 
 export default function CompanyKpis({ symbol }: { symbol: string }) {
   const sym = (symbol ?? "").trim().toUpperCase();
-  const backendBase = React.useMemo(() => "http://localhost:5046", []);
+  const backendBase = React.useMemo(() => "", []);
   const { fadeClass } = useCurrencyFade();
 
   // 🧩 Currency context and formatter

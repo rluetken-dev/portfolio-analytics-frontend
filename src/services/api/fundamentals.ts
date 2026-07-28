@@ -26,7 +26,7 @@ export async function fetchFundamentalsSnapshot(
   const sym = (symbol ?? "").trim().toUpperCase();
   if (!sym) return { status: 400, data: null };
 
-  const pathUrl = `http://localhost:5046/api/fundamentals/${encodeURIComponent(
+  const pathUrl = `/api/fundamentals/${encodeURIComponent(
     sym,
   )}/snapshot/stable?period=${encodeURIComponent(period)}&limit=${encodeURIComponent(String(limit))}`;
 
@@ -42,7 +42,7 @@ export async function fetchFundamentalsSnapshot(
 
     console.warn("[snapshot] path failed:", resp.status);
     if (resp.status === 404) {
-      const queryUrl = `http://localhost:5046/api/fundamentals/snapshot/stable?symbol=${encodeURIComponent(
+      const queryUrl = `/api/fundamentals/snapshot/stable?symbol=${encodeURIComponent(
         sym,
       )}&period=${encodeURIComponent(period)}&limit=${encodeURIComponent(String(limit))}`;
 
@@ -96,7 +96,7 @@ async function ingestFallback(
   const limit = Math.max(1, years);
 
   async function hit(path: string) {
-    const url = `http://localhost:5046${path}`;
+    const url = path;
     const resp = await fetch(url, { headers: { Accept: "application/json" } });
     if (!resp.ok) throw new Error(`HTTP ${resp.status} on ${path}`);
 
@@ -136,7 +136,7 @@ export async function refreshFundamentals(
   const sym = (symbol ?? "").trim().toUpperCase();
   if (!sym) throw new Error("No symbol");
 
-  const url = `http://localhost:5046/api/fundamentals/refresh?symbol=${encodeURIComponent(
+  const url = `/api/fundamentals/refresh?symbol=${encodeURIComponent(
     sym,
   )}&period=${encodeURIComponent(period)}&years=${encodeURIComponent(String(years))}`;
 

@@ -1,189 +1,278 @@
-# 🚀 Portfolio Analytics Frontend — Detailed Guide
+# Portfolio Analytics Frontend - Detailed Guide
 
-This document describes setup, configuration, architecture, components, testing and operations for the **frontend**.  
-For a quick overview and badges, see the root [README.md](./README.md).
+This document describes the frontend setup, configuration, architecture, main components, testing approach, and known development constraints.
 
----
+For the short project overview, see the root [README.md](../README.md).
 
 ## Overview
 
-- **Purpose:** Modern React/Vite app for exploring companies, fetching & visualizing analytics, and managing watchlists.
-- **UX:** Clear, compact **status messages**; graceful handling of free‑tier and rate‑limit constraints.
-- **Integration:** Uses `VITE_API_BASE=/api` and the Vite dev proxy to connect to the .NET backend.
+The frontend is a React/Vite application for the Portfolio Analytics backend. It provides authenticated user workflows for managing a portfolio, discovering companies, viewing price charts, and reviewing financial analytics.
 
-## Key Features
+The application is intended to run locally against the ASP.NET Core backend. In development, API requests are routed through the Vite proxy by using `VITE_API_BASE=/api`.
 
-- **🔍 Smart Company Search** — local‑first search, offline popular bundle, external fallback.
-- **📊 Real‑time Analytics** — inline KPIs, simple sparkline, charts.
-- **🏢 Company Management** — add/remove/track companies with quick actions (Mega‑Cap, Tech Giants, Dow 30, …).
-- **🔔 User Feedback** — transient error pills + persistent status lines.
-- **📱 Responsive** — desktop & mobile friendly.
-- **🧭 Routing** — multi‑page app with React Router.
+## Main Features
+
+- user registration and login
+- authenticated portfolio pages
+- cash balance display and updates
+- company search and discovery
+- adding and removing portfolio companies
+- buy and sell transaction workflows
+- company detail pages
+- line and candlestick price charts
+- financial analytics panels
+- status messages for backend, provider, and rate-limit responses
 
 ## Tech Stack
 
-- **React 19.1.1**
-- **TypeScript 5.8.3**
-- **Vite 7.1.2**
-- **React Router 7.9.1**
-- **Recharts 3.2.0** (KPI charts)
-- **Lightweight Charts 5.0.8** (candles)
-- Node ≥ 20
+- React 19
+- TypeScript 5
+- Vite 7
+- React Router 7
+- Recharts
+- Lightweight Charts
+- ASP.NET Core Web API backend
 
-## Project Structure
+## Local Setup
 
-```
-src/
-├── pages/
-│   ├── Companies.tsx        # company list with search & filters
-│   ├── Company.tsx          # detailed company view
-│   ├── Home.tsx             # landing
-│   ├── Health.tsx           # backend status/health
-│   └── About.tsx            # about
-│
-├── components/
-│   ├── NavBar.tsx
-│   ├── Notification.tsx
-│   ├── ConfirmDialog.tsx
-│   ├── CompanyDiscovery.tsx
-│   ├── AnalyticsMiniPanel.tsx
-│   └── company/
-│       ├── CompanyHeader.tsx
-│       ├── CompanyKpis.tsx
-│       ├── CompanyPriceChart.tsx
-│       ├── CompanyCandleChart.tsx
-│       └── analytics/
-│
-├── services/api/
-│   ├── client.ts            # HTTP client
-│   ├── analytics.ts         # analytics endpoints
-│   ├── fundamentals.ts      # fundamentals endpoints
-│   └── quotes.ts            # price endpoints
-│
-├── utils/
-│   ├── statusMessages.ts
-│   ├── statusMessages.test.ts
-│   ├── dateUtils.ts
-│   └── …
-├── types/
-└── context/
+Start the backend first.
+
+Expected backend URL:
+
+```text
+http://localhost:5046
 ```
 
-## Components (highlights)
+Swagger UI:
 
-### CompanyDiscovery
+```text
+http://localhost:5046/swagger
+```
 
-- Three discovery paths: **quick‑add buttons**, **search over offline bundle**, **external fallback**.
+Install frontend dependencies:
 
-### Notification System
+```powershell
+npm install
+```
 
-- Auto‑dismiss success/error, consistent styling, click to dismiss.
+Create a local environment file:
 
-### ConfirmDialog
+```powershell
+Copy-Item .env.example .env.development
+```
 
-- Replaces `confirm()` with themed modal; variants: danger/warning/info; backdrop‑to‑cancel.
-
-### AnalyticsMiniPanel
-
-- Inline analytics: KPIs, sparkline, **Get/Save fundamentals**, **Get live price**.
-
-## Environment & Config
-
-Create `.env.development`:
+Expected local configuration:
 
 ```env
 VITE_API_BASE=/api
-VITE_APP_TITLE="Portfolio Analytics"
 ```
 
-Ports:
+Run the frontend:
 
-- **Frontend dev**: `http://localhost:5173`
-- **Backend**: `http://localhost:5046` (Swagger at `/swagger`)
-
-## Scripts
-
-```bash
-npm run dev          # start Vite dev server
-npm run build        # production build
-npm run preview      # preview production build
-npm run lint         # ESLint check
-npm run lint:fix     # ESLint auto-fix
-npm run format       # Prettier format
-npm run test:status  # status message smoke tests
+```powershell
+npm run dev
 ```
 
-## Status Messages (semantics)
+On Windows, if PowerShell blocks `npm.ps1`, use:
 
-The UI maps responses to **clear categories**:
+```powershell
+npm.cmd install
+npm.cmd run dev
+```
 
-- `200` → ✔️ Request successful
-- `404` → ❌ No data found
-- `400` → ⚠️ Bad request
-- `402` (or text markers) → ⛔ Free‑tier limit
-- `429` (or text markers) → ⏳ Rate limit (e.g., `Daily limit`, `Rate limit (10s)`)
-- `5xx` → ⚠️ Server error
-  > Embedded `402/429` inside `5xx` are still recognized by text hints.
+The Vite dev server usually starts on:
 
-**Tests**
+```text
+http://localhost:5173
+```
 
-```bash
+If that port is already in use, Vite will choose the next available port.
+
+## Project Structure
+
+```text
+src/
+  components/
+    company/
+      analytics/
+  constants/
+  context/
+  hooks/
+  pages/
+  services/
+    api/
+  styles/
+  types/
+  utils/
+```
+
+## Important Areas
+
+### API Client
+
+The shared API helper is located in:
+
+```text
+src/services/api/client.ts
+```
+
+It is responsible for:
+
+- building API URLs from `VITE_API_BASE`
+- attaching JSON headers
+- attaching authentication headers
+- handling timeouts
+- handling retry behavior for safe requests
+- mapping backend error responses
+- refreshing authentication when possible
+
+### Authentication
+
+Authentication state is managed through:
+
+```text
+src/context/AuthProvider.tsx
+src/context/auth-context.ts
+src/hooks/useAuth.ts
+src/services/api/auth.ts
+src/utils/token.ts
+```
+
+The access token is stored in frontend memory. Refresh token handling is delegated to the backend through HTTP-only cookies.
+
+### Portfolio View
+
+The main portfolio page is:
+
+```text
+src/pages/Companies.tsx
+```
+
+It currently contains company loading, search/filter state, portfolio actions, transaction dialog state, analytics panel selection, and chart rendering.
+
+This file is functional, but it is a good future refactoring candidate because it contains multiple responsibilities.
+
+### Company Detail View
+
+The company detail page is:
+
+```text
+src/pages/Company.tsx
+```
+
+It combines:
+
+- company header
+- KPI summary
+- price chart
+- candlestick chart
+- financial analytics panel
+
+### Status Messages
+
+Status mapping logic is located in:
+
+```text
+src/utils/statusMessages.ts
+```
+
+The frontend groups backend responses into user-facing categories such as:
+
+- request successful
+- no data found
+- bad request
+- free-tier limit
+- rate limit
+- server error
+
+The status message smoke test is located in:
+
+```text
+src/utils/statusMessages.test.ts
+```
+
+Run it with:
+
+```powershell
 npm run test:status
-# File: src/utils/statusMessages.test.ts
 ```
-
-The test simulates cases (200/400/404/402/429/5xx incl. embedded hints) and checks the pill + status line.
 
 ## API Integration
 
-- HTTP layer in `src/services/api/*` with minimal client helpers.
-- Endpoints:
-  - **Analytics**: `/api/analytics/<metric>?symbol=XYZ`
-  - **Fundamentals**: `/api/data/*` and `/api/ingest/*` via backend actions
-  - **Quotes**: `/api/quotes/latest?symbol=XYZ&take=1`, `/api/quotes/timeseries?...`
-- Strategy: **local‑first** in backend + client‑side debouncing to reduce calls (free tier).
+The frontend primarily communicates with these backend areas:
 
-## State Management
+- `/api/User`
+- `/api/UserCompany`
+- `/api/UserCompanyTransactions`
+- `/api/companies`
+- `/api/quotes`
+- `/api/analytics`
+- `/api/data`
+- `/api/ingest`
 
-- Local component state (hooks), route state via React Router.
-- Persistence via `localStorage` for small preferences (e.g., pinned symbols).
+External financial API keys are not configured in the frontend. They belong to the backend.
 
-## Performance
+## Demo And API Key Behavior
 
-- Route‑level code splitting, memoization, debounced search.
-- Lightweight sparkline (pure SVG), minimal re‑renders.
+The frontend is designed to work with backend-local demo data.
 
-## Browser Support
+Live provider functionality depends on backend configuration:
 
-- Chrome/Edge/Firefox/Safari (latest), and modern mobile browsers.
+- Financial Modeling Prep keys are used by the backend for live company and fundamentals data.
+- Alpha Vantage keys are used by the backend for quote and price data.
 
-## Contributing
+Without provider keys, the frontend should still be able to use local authentication, portfolio workflows, stored companies, stored prices, and seeded demo data exposed by the backend.
 
-- Conventional Commits (`feat:`, `fix:`, `docs:`, …)
-- Feature branches → PRs
+## Scripts
 
-## Known Issues
+```powershell
+npm run dev
+npm run build
+npm run preview
+npm run lint
+npm run lint:fix
+npm run format
+npm run test:status
+```
 
-- Search & ingestion depend on provider free tiers (may hit **rate/free‑tier limits**).
-- Some ETFs/firms may have incomplete fundamentals.
-- Candles require sufficient history.
+## Checks Before Commit
 
-## Roadmap
+Run these commands before committing frontend changes:
 
-- Dark mode
-- Export (CSV/Excel)
-- Portfolio tracking & watchlists
-- Technical indicators
-- Real‑time price updates (WebSocket)
-- Mobile app (React Native)
+```powershell
+npm run lint
+npm run build
+npm run test:status
+```
 
-## Docs & Links
+If PowerShell blocks `npm.ps1`, use the `npm.cmd` equivalent.
 
-- **Backend Swagger:** http://localhost:5046/swagger
-- **Backend repository:** https://github.com/rluetken-dev/portfolio-analytics-backend
-- **Commit conventions:** https://www.conventionalcommits.org/
+## Known Technical Debt
 
-## License & Author
+- Some API calls still use direct `fetch` instead of the shared API client.
+- Some files still contain development comments and debug logging.
+- `src/pages/Companies.tsx` is large and should be split into smaller components and hooks.
+- Status message tests are currently implemented as a small script instead of a full test runner setup.
+- Some UI styling is implemented inline and should eventually be consolidated.
 
-- MIT — see `LICENSE`
-- Author: rluetken (GitHub: @rluetken-dev)
+## Portfolio Readiness Notes
+
+Before publishing screenshots or a new release, verify:
+
+- fresh clone setup works
+- backend starts without external API keys
+- frontend can register a new user
+- seeded/demo data can be displayed
+- portfolio actions work with local backend data
+- charts render without live provider calls where local data is available
+- `npm run lint`, `npm run build`, and `npm run test:status` pass locally
+
+## Related Projects
+
+Backend repository:
+
+[portfolio-analytics-backend](https://github.com/rluetken-dev/portfolio-analytics-backend)
+
+## Notes
+
+This project is a portfolio and training project focused on React, TypeScript, API integration, authentication flows, financial dashboards, and frontend state handling.

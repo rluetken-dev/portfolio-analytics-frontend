@@ -1,10 +1,10 @@
 # Commit Message Guidelines
 
-This project follows the **Conventional Commits** specification to keep a clean, readable Git history.
+This project follows the Conventional Commits specification to keep a clean, readable Git history.
 
-Format:
+## Format
 
-```
+```text
 <type>(optional scope): <short summary>
 
 (optional body)
@@ -12,73 +12,68 @@ Format:
 (optional footer)
 ```
 
----
-
 ## Types
 
-- **feat**: A new feature
-- **fix**: A bug fix
-- **docs**: Documentation only changes (e.g., README, XML comments, Swagger)
-- **style**: Changes that do not affect meaning of the code (formatting, missing semicolons, etc.)
-- **refactor**: Code change that neither fixes a bug nor adds a feature
-- **test**: Adding or updating tests
-- **chore**: Changes to build process, CI/CD, dependencies, or auxiliary tools
+- `feat`: a new feature
+- `fix`: a bug fix
+- `docs`: documentation-only changes
+- `style`: formatting or styling changes that do not affect behavior
+- `refactor`: code changes that neither fix a bug nor add a feature
+- `test`: adding or updating tests
+- `chore`: build, CI, dependency, or tooling changes
 
----
+## Frontend Scopes
+
+Scopes are optional, but useful for keeping the history easy to scan.
+
+Common scopes for this project:
+
+- `auth`
+- `companies`
+- `portfolio`
+- `charts`
+- `analytics`
+- `api`
+- `ui`
+- `docs`
+- `ci`
 
 ## Examples
 
-### Features
-
-```
-feat(api): add CORS support for frontend integration
+```text
+feat(companies): add company discovery panel
 ```
 
-### Bug Fixes
-
-```
-fix(api): correct null reference in UpdateNoteRequest handler
+```text
+fix(auth): refresh session after page reload
 ```
 
-### Documentation
-
-```
-docs(api): add XML comments for CRUD endpoints and improve README
+```text
+docs(readme): clarify local setup
 ```
 
-### Style
-
-```
-style: format code with dotnet formatter
+```text
+style(ui): align portfolio table spacing
 ```
 
-### Refactor
-
-```
-refactor(api): simplify pagination logic in GetAll endpoint
+```text
+refactor(api): centralize frontend fetch handling
 ```
 
-### Tests
-
-```
-test(api): add integration tests for NotesController
+```text
+test(status): add status message smoke tests
 ```
 
-### Chore
-
+```text
+chore(ci): update Node version in GitHub Actions
 ```
-chore(ci): update GitHub Actions workflow to use .NET 8.0.2
-```
-
----
 
 ## Tips
 
-- Keep the summary short (max ~72 characters).
-- Use **imperative mood** ("add" not "added").
+- Keep the summary short, ideally under 72 characters.
+- Use imperative mood, for example `add`, not `added`.
 - Use lowercase for type and scope.
-- Scope is optional, but recommended (e.g., `api`, `frontend`, `ci`).
-
----
+- Keep each commit focused on one logical change.
+- Prefer a scope when it makes the affected area clearer.
 
 For more details, see [Conventional Commits](https://www.conventionalcommits.org).

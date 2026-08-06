@@ -1,29 +1,17 @@
-// src/components/AnalyticsMiniPanel.tsx
-import { useCallback, useMemo, useState, useEffect, useRef, useContext } from "react";
-import { getLatestCloseFromQuotes } from "../services/api/quotes";
-import { fetchFundamentalsSnapshot, type SnapshotResult } from "../services/api/fundamentals";
-import { fetchLatestDateISO } from "../utils/dateUtils";
-import { fetchJson } from "../services/api/client";
-import type { CurrentQuote } from "../services/api/quotes";
-import { CurrencyContext } from "../context/CurrencyContextObject";
-import type { CurrencyCode } from "../types/currency";
-import { useFormatDisplayValue } from "../utils/formatDisplayValue";
-import { useCurrencyFade } from "../hooks/useCurrencyFade";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties, KeyboardEvent } from "react";
 
-/**
- * Very small self-contained panel to show two metrics for a symbol:
- * - Latest price (via QuotesController: /api/quotes/latest?take=1)
- * - Latest P/E (via AnalyticsController: /api/analytics/pe?symbol=...)
- *
- * Notes:
- * - We call the backend directly with a full URL for P/E to avoid dev-proxy issues.
- * - All UI strings are minimal; comments in English for clarity.
- */
+import { getLatestCloseFromQuotes } from "../services/api/quotes";
+import { fetchFundamentalsSnapshot } from "../services/api/fundamentals";
+import { fetchJson } from "../services/api/client";
+import { fetchLatestDateISO } from "../utils/dateUtils";
+import { useCurrencyFade } from "../hooks/useCurrencyFade";
+import { useFormatDisplayValue } from "../utils/formatDisplayValue";
+
 type Metric = {
   label: string;
-  value: string | number | null;
+  value: number | null;
   hint?: string;
-  baseUnit?: string;
 };
 
 type MetricSection = {
@@ -31,1097 +19,895 @@ type MetricSection = {
   items: Metric[];
 };
 
-// Price timeseries point
-type TimeseriesPoint = { date: string; close: number };
-
-// persist the last used symbol (dev-friendly)
-const STORAGE_KEY = "analytics:lastSymbol";
-
-// shared grid style so all sections render with identical column sizing
-const GRID: React.CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(6, minmax(0, 1fr))", // consistent width
-  gap: 6, // tighter spacing
-  justifyItems: "stretch",
-  //outline: "1px dashed #555",
+type MetricResult = {
+  value: number | null;
+  status: number;
 };
 
-const CARD: React.CSSProperties = {
-  // allow shrink inside grid track; prevent content from stretching columns
+type TimeseriesPoint = {
+  date: string;
+  close: number;
+};
+
+type CompanyLookupResult = {
+  symbol?: string;
+};
+
+type LatestQuoteRow = {
+  date?: string;
+  tradingDate?: string;
+};
+
+type FundamentalsRefreshResponse = {
+  inserted?: {
+    income?: number;
+    balance?: number;
+    cash?: number;
+  };
+};
+
+type AnalyticsMiniPanelProps = {
+  initialSymbol?: string;
+  onSymbolChange?: (symbol: string) => void;
+};
+
+const STORAGE_KEY = "analytics:lastSymbol";
+const PINNED_STORAGE_KEY = "analytics:pinned";
+const MAX_PINNED_SYMBOLS = 12;
+const PRICE_STALE_AFTER_MS = 1000 * 60 * 60 * 24;
+
+const PANEL_STYLE: CSSProperties = {
+  border: "1px solid #222",
+  borderRadius: 14,
+  padding: 12,
+  display: "grid",
+  gap: 10,
+  width: "100%",
+  boxSizing: "border-box",
+  marginTop: 16,
+};
+
+const GRID_STYLE: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(6, minmax(0, 1fr))",
+  gap: 6,
+  justifyItems: "stretch",
+};
+
+const CARD_STYLE: CSSProperties = {
   border: "1px solid #333",
   borderRadius: 8,
   padding: 6,
   minHeight: 54,
-  minWidth: 0, // <-- critical: let the card shrink within the grid column
-  overflow: "hidden", // <-- avoid layout push; long text won't expand the column
+  minWidth: 0,
+  overflow: "hidden",
   width: "100%",
 };
 
-const HINT: React.CSSProperties = {
+const HINT_STYLE: CSSProperties = {
   fontSize: 10,
   opacity: 0.7,
   marginTop: 2,
-  whiteSpace: "nowrap", // keep hint on a single line
-  overflow: "hidden", // clip if too long
+  whiteSpace: "nowrap",
+  overflow: "hidden",
   textOverflow: "ellipsis",
 };
 
-// Compact skeleton card used while loading
-function SkeletonCard({ label }: { label: string }) {
-  return (
-    <div
-      style={{
-        border: "1px solid #333",
-        borderRadius: 8, // tighter corners
-        padding: 6, // smaller padding
-        minHeight: 54, // shorter card
-      }}
-      aria-busy="true"
-      aria-live="polite"
-    >
-      <div style={{ fontSize: 10, opacity: 0.6 }}>{label}</div>
-      <div
-        style={{
-          marginTop: 6,
-          height: 18, // slimmer shimmer bar
-          borderRadius: 6,
-          background:
-            "linear-gradient(90deg, rgba(255,255,255,0.08) 25%, rgba(255,255,255,0.18) 37%, rgba(255,255,255,0.08) 63%)",
-          backgroundSize: "400% 100%",
-          animation: "shine 1.2s ease-in-out infinite",
-        }}
-      />
-      <style>
-        {`@keyframes shine {
-            0% { background-position: 100% 0; }
-            100% { background-position: 0 0; }
-          }`}
-      </style>
-    </div>
-  );
+function normalizeSymbol(value: string | null | undefined): string {
+  return (value ?? "").trim().toUpperCase();
 }
 
-// // compact number formatter for big absolutes (K/M/B/T)
-// function formatCompactNumber(n: number): string {
-//   const abs = Math.abs(n);
-//   const fmt = (v: number, s: string) =>
-//     // fewer decimals for bigger magnitudes
-//     `${v >= 100 ? v.toFixed(0) : v >= 10 ? v.toFixed(1) : v.toFixed(2)}${s}`;
-
-//   if (abs >= 1e12) return fmt(n / 1e12, "T");
-//   if (abs >= 1e9) return fmt(n / 1e9, "B");
-//   if (abs >= 1e6) return fmt(n / 1e6, "M");
-//   if (abs >= 1e3) return fmt(n / 1e3, "K");
-//   return abs >= 100 ? n.toFixed(0) : abs >= 10 ? n.toFixed(1) : n.toFixed(2);
-// }
-
-// // unified format helpers
-// function formatPercent(v: number | null | undefined): string {
-//   if (v == null || Number.isNaN(v)) return "n/a";
-//   return `${(v * 100).toFixed(1)}%`;
-// }
-
-// function formatRatio(v: number | null | undefined): string {
-//   if (v == null || Number.isNaN(v)) return "n/a";
-//   return `${v.toFixed(2)}x`;
-// }
-
-// function formatPerShare(v: number | null | undefined, unit?: string): string {
-//   if (v == null || Number.isNaN(v)) return "n/a";
-//   // Keep 2 decimals and append unit (USD/EUR) if provided
-//   return `${v.toFixed(2)}${unit ? ` ${unit}` : ""}`;
-// }
-
-// Format Date -> "YYYY-MM-DD"
-function fmt(d: Date) {
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  return `${d.getFullYear()}-${mm}-${dd}`;
+function formatDate(date: Date): string {
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${date.getFullYear()}-${month}-${day}`;
 }
 
-// Build SVG polyline points string from timeseries
-function buildPolyline(pts: TimeseriesPoint[], w: number, h: number): string {
-  if (pts.length === 0) return "";
-  const ys = pts.map((p) => p.close);
-  const minY = Math.min(...ys);
-  const maxY = Math.max(...ys);
+function makeRowGrid(columns: number): CSSProperties {
+  return {
+    display: "grid",
+    gridTemplateColumns: `repeat(${Math.max(columns, 1)}, minmax(0, 1fr))`,
+    gap: 6,
+  };
+}
+
+function buildPolyline(points: TimeseriesPoint[], width: number, height: number): string {
+  if (points.length === 0) return "";
+
+  const closes = points.map((point) => point.close);
+  const minY = Math.min(...closes);
+  const maxY = Math.max(...closes);
   const spanY = maxY - minY || 1;
-  const stepX = pts.length > 1 ? w / (pts.length - 1) : 0;
+  const stepX = points.length > 1 ? width / (points.length - 1) : 0;
 
-  return pts
-    .map((p, i) => {
-      const x = Math.round(i * stepX);
-      // invert y for SVG (0 at top)
-      const y = Math.round(h - ((p.close - minY) / spanY) * h);
+  return points
+    .map((point, index) => {
+      const x = Math.round(index * stepX);
+      const y = Math.round(height - ((point.close - minY) / spanY) * height);
       return `${x},${y}`;
     })
     .join(" ");
 }
 
-/**
- * Tiny helper to fetch a numeric metric from /api/analytics/*.
- * Accepts multiple candidate keys (e.g., ["value","roe"]) for flexible mapping.
- */
+function metricHint(status: number): string | undefined {
+  return status === 200 ? undefined : `HTTP ${status}`;
+}
+
+function isValidNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function readMetricValue(raw: unknown, candidateKeys: string[]): number | null {
+  if (isValidNumber(raw)) return raw;
+
+  if (typeof raw !== "object" || raw === null) {
+    return null;
+  }
+
+  const obj = raw as Record<string, unknown>;
+
+  for (const key of candidateKeys) {
+    if (isValidNumber(obj[key])) {
+      return obj[key];
+    }
+  }
+
+  return null;
+}
+
 async function fetchMetricNumber(
-  baseUrl: string,
   path: string,
   symbol: string,
   candidateKeys: string[],
-): Promise<{ value: number | null; status: number }> {
-  const resp = await fetch(`${baseUrl}${path}?symbol=${encodeURIComponent(symbol)}`, {
+): Promise<MetricResult> {
+  const response = await fetch(`${path}?symbol=${encodeURIComponent(symbol)}`, {
     headers: { Accept: "application/json" },
   });
-  if (!resp.ok) {
-    return { value: null, status: resp.status };
+
+  if (!response.ok) {
+    return { value: null, status: response.status };
   }
-  const raw = (await resp.json()) as unknown;
-  if (typeof raw === "number") return { value: raw, status: resp.status };
-  if (raw && typeof raw === "object") {
-    const o = raw as Record<string, unknown>;
-    for (const k of candidateKeys) {
-      if (typeof o[k] === "number") return { value: o[k] as number, status: resp.status };
-    }
-  }
-  return { value: null, status: resp.status };
+
+  const raw = (await response.json()) as unknown;
+
+  return {
+    value: readMetricValue(raw, candidateKeys),
+    status: response.status,
+  };
 }
 
-// build a per-section row grid that spans the full width
-const makeRowGrid = (cols: number): React.CSSProperties => ({
-  display: "grid",
-  gridTemplateColumns: `repeat(${Math.max(cols, 1)}, minmax(0, 1fr))`,
-  gap: 6,
-});
+function readCompanyResults(raw: unknown): CompanyLookupResult[] {
+  if (Array.isArray(raw)) {
+    return raw as CompanyLookupResult[];
+  }
 
-// optional initial symbol + notify parent when active symbol changes
+  if (typeof raw !== "object" || raw === null) {
+    return [];
+  }
+
+  const obj = raw as Record<string, unknown>;
+  const results = obj.results ?? obj.Results;
+
+  return Array.isArray(results) ? (results as CompanyLookupResult[]) : [];
+}
+
+async function searchCompanies(query: string, limit: number): Promise<CompanyLookupResult[]> {
+  const encodedQuery = encodeURIComponent(query);
+
+  const urls = [
+    `/api/companies/search?q=${encodedQuery}&limit=${limit}`,
+    `/api/companies?q=${encodedQuery}&limit=${limit}`,
+  ];
+
+  for (const url of urls) {
+    try {
+      const response = await fetch(url, {
+        headers: { Accept: "application/json" },
+      });
+
+      if (!response.ok) {
+        continue;
+      }
+
+      const raw = (await response.json()) as unknown;
+      const results = readCompanyResults(raw);
+
+      if (results.length > 0) {
+        return results;
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return [];
+}
+
+async function resolveTicker(query: string): Promise<string | null> {
+  const normalizedQuery = query.trim();
+  if (!normalizedQuery) return null;
+
+  const results = await searchCompanies(normalizedQuery, 2);
+  const firstSymbol = results[0]?.symbol;
+
+  return firstSymbol ? normalizeSymbol(firstSymbol) : null;
+}
+
+async function fetchTimeseries(symbol: string, anchorDate?: string | null): Promise<TimeseriesPoint[]> {
+  const query = new URLSearchParams({ symbol });
+
+  if (anchorDate) {
+    const to = new Date(anchorDate);
+    const from = new Date(to);
+    from.setDate(to.getDate() - 180);
+
+    query.set("from", formatDate(from));
+    query.set("to", formatDate(to));
+  }
+
+  const response = await fetch(`/api/quotes/timeseries?${query.toString()}`, {
+    headers: { Accept: "application/json" },
+  });
+
+  if (!response.ok) {
+    return [];
+  }
+
+  const raw = (await response.json()) as unknown;
+  const rows = Array.isArray(raw) ? raw : [];
+
+  return rows
+    .map((row) => {
+      const item = row as Record<string, unknown>;
+
+      return {
+        date: typeof item.date === "string" ? item.date : String(item.date ?? ""),
+        close: isValidNumber(item.close) ? item.close : Number.NaN,
+      };
+    })
+    .filter((point) => point.date && Number.isFinite(point.close))
+    .sort((a, b) => a.date.localeCompare(b.date));
+}
+
+function getLatestQuoteDate(rows: unknown): string | null {
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return null;
+  }
+
+  const latest = rows[0] as LatestQuoteRow;
+  const date = latest.date ?? latest.tradingDate;
+
+  return typeof date === "string" && date.length >= 10 ? date.slice(0, 10) : null;
+}
+
+async function refreshQuotes(symbol: string): Promise<void> {
+  await fetchJson({
+    path: `/api/quotes/refresh?symbols=${encodeURIComponent(symbol)}&range=30d`,
+    method: "POST",
+    timeoutMs: 45_000,
+  });
+}
+
+async function refreshFundamentals(symbol: string): Promise<FundamentalsRefreshResponse | null> {
+  const response = await fetch(`/api/fundamentals/refresh?symbol=${encodeURIComponent(symbol)}`, {
+    method: "POST",
+    headers: { Accept: "application/json" },
+  });
+
+  if (!response.ok) {
+    return null;
+  }
+
+  return (await response.json()) as FundamentalsRefreshResponse;
+}
+
+async function fetchSnapshotMetricFallback(symbol: string): Promise<{
+  pe?: number;
+  netMargin?: number;
+}> {
+  const snapshot = await fetchFundamentalsSnapshot(symbol, "annual", 1);
+
+  if (snapshot.status !== 200 || !snapshot.data?.metrics) {
+    return {};
+  }
+
+  const metrics = snapshot.data.metrics as Record<string, unknown>;
+  const read = (...keys: string[]): number | undefined => {
+    for (const key of keys) {
+      if (isValidNumber(metrics[key])) {
+        return metrics[key];
+      }
+    }
+
+    return undefined;
+  };
+
+  return {
+    pe: read("peRatioTTM", "peTTM", "pe"),
+    netMargin: read("netProfitMarginTTM", "netMarginTTM", "netMargin"),
+  };
+}
+
+function SkeletonCard({ label }: { label: string }) {
+  return (
+    <div style={CARD_STYLE} aria-busy="true" aria-live="polite">
+      <div style={{ fontSize: 10, opacity: 0.6 }}>{label}</div>
+      <div
+        style={{
+          marginTop: 6,
+          height: 18,
+          borderRadius: 6,
+          background:
+            "linear-gradient(90deg, rgba(255,255,255,0.08) 25%, rgba(255,255,255,0.18) 37%, rgba(255,255,255,0.08) 63%)",
+          backgroundSize: "400% 100%",
+          animation: "analyticsShine 1.2s ease-in-out infinite",
+        }}
+      />
+    </div>
+  );
+}
+
+function SectionHeader({ section }: { section: MetricSection }) {
+  const available = section.items.filter((item) => item.value !== null).length;
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 6,
+        fontSize: 10,
+        opacity: 0.8,
+        margin: "6px 2px 2px",
+      }}
+    >
+      <span>{section.title}</span>
+      <span
+        title="Available metrics in this section"
+        style={{
+          border: "1px solid #333",
+          borderRadius: 6,
+          padding: "1px 6px",
+          fontSize: 10,
+          opacity: 0.75,
+        }}
+      >
+        {available}/{section.items.length}
+      </span>
+    </div>
+  );
+}
+
+function AnalyticsStyles() {
+  return (
+    <style>
+      {`
+        @keyframes analyticsShine {
+          0% { background-position: 100% 0; }
+          100% { background-position: 0 0; }
+        }
+
+        @keyframes analyticsFadeSlideIn {
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+
+        @keyframes analyticsFadeSlideOut {
+          from {
+            opacity: 1;
+            transform: translateY(0);
+          }
+          to {
+            opacity: 0;
+            transform: translateY(-8px);
+          }
+        }
+      `}
+    </style>
+  );
+}
+
 export default function AnalyticsMiniPanel({
   initialSymbol,
   onSymbolChange,
-}: {
-  initialSymbol?: string;
-  onSymbolChange?: (s: string) => void;
-}) {
-  const { fadeClass } = useCurrencyFade(); // ✨ Smooth fade for currency changes
+}: AnalyticsMiniPanelProps) {
+  const [symbol, setSymbol] = useState("");
+  const [confirmedSymbol, setConfirmedSymbol] = useState("");
+  const [sections, setSections] = useState<MetricSection[]>([]);
+  const [sparkline, setSparkline] = useState<TimeseriesPoint[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  // --- Core query & global UI state ---
-  const [symbol, setSymbol] = useState<string>("");
+  const [baseClose, setBaseClose] = useState<number | null>(null);
+  const [livePrice, setLivePrice] = useState<number | null>(null);
 
-  // normalized symbol (must be declared early so helpers can use it)
-  const currentSym = useMemo(() => symbol.trim().toUpperCase(), [symbol]);
+  const [autoStatus, setAutoStatus] = useState<string | null>(null);
+  const [isStatusExiting, setIsStatusExiting] = useState(false);
 
-  const [loading, setLoading] = useState(false); // global page loading (metrics reload)
-  const [err, setErr] = useState<string | null>(null); // global banner error (rare)
-
-  // --- Data caches shown in the panel ---
-  const [sections, setSections] = useState<MetricSection[]>([]); // normalized metrics groups
-  const [spark, setSpark] = useState<TimeseriesPoint[]>([]); // 180d sparkline points
-  const [live, setLive] = useState<CurrentQuote | null>(null); // latest live quote payload
-  const [baseClose, setBaseClose] = useState<number | null>(null); // last cached close for delta badge
-
-  // stores unformatted base values (always numeric, original currency)
-  const [baseSections, setBaseSections] = useState<MetricSection[]>([]);
-
-  // --- Fundamentals raw snapshot (debug/preview; not persisted) ---
-  const [fundRes, setFundRes] = useState<SnapshotResult | null>(null); // result of snapshot call
-
-  // --- Transient error pills per action (auto-hidden after 5s) ---
-  const [priceFetchErr, setPriceFetchErr] = useState<string | null>(null); // Get price data error
-  const [liveErr, setLiveErr] = useState<string | null>(null); // Get live price error
-  const [fundSnapErr, setFundSnapErr] = useState<string | null>(null); // Get fundamentals error
-  const [fundErr, setFundErr] = useState<string | null>(null); // Save fundamentals error
-
-  // --- Pinned symbols (quick switch) ---
   const [pinned, setPinned] = useState<string[]>(() => {
-    // read pinned list from localStorage (uppercase, cap length)
     try {
-      const raw = localStorage.getItem("analytics:pinned");
-      if (raw) {
-        const arr = JSON.parse(raw);
-        if (Array.isArray(arr)) {
-          return arr.map((s: unknown) => String(s).toUpperCase()).slice(0, 12);
-        }
-      }
-    } catch (e) {
-      console.warn("[pinned] read failed:", e); // ignore storage read errors
+      const raw = localStorage.getItem(PINNED_STORAGE_KEY);
+      const parsed = raw ? (JSON.parse(raw) as unknown) : null;
+
+      return Array.isArray(parsed)
+        ? parsed.map((item) => normalizeSymbol(String(item))).filter(Boolean).slice(0, MAX_PINNED_SYMBOLS)
+        : [];
+    } catch {
+      return [];
     }
-    return [];
   });
 
-  const [confirmedSym, setConfirmedSym] = useState<string>("");
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const isTypingRef = useRef(true);
+  const lastFreshnessCheckRef = useRef<string | null>(null);
 
-  const typingRef = useRef(false); // blocks auto-load while user is editing
-
-  const searchRef = useRef<HTMLInputElement | null>(null); // track input element to detect focus
-
-  const lastAnnouncedRef = useRef<string | null>(null);
-
-  const lastInitialSymRef = useRef<string | null>(null); // remember last adopted initialSymbol to avoid duplicates
-
-  // --- Auto-refresh status indicator ---
-  const [autoStatus, setAutoStatus] = useState<string | null>(null); // small status line shown during freshness check
-  const [isStatusExiting, setIsStatusExiting] = useState(false); // controls fade-out animation
-
-  const { formatMoneyFrom, currency } = useContext(CurrencyContext)!;
+  const currentSymbol = useMemo(() => normalizeSymbol(symbol), [symbol]);
+  const { fadeClass } = useCurrencyFade();
   const { formatDisplayValue } = useFormatDisplayValue();
 
-  // Safe converter for price.unit → CurrencyCode
-  const safeCurrencyCode = (unit?: string): CurrencyCode => {
-    const u = (unit ?? "USD").toUpperCase();
-    const valid: CurrencyCode[] = ["USD", "EUR", "CHF", "GBP", "JPY"];
-    return valid.includes(u as CurrencyCode) ? (u as CurrencyCode) : "USD";
-  };
-
-  // persist pinned list on change
   useEffect(() => {
     try {
-      if (pinned.length === 0) localStorage.removeItem("analytics:pinned");
-      else localStorage.setItem("analytics:pinned", JSON.stringify(pinned));
-    } catch (e) {
-      console.warn("[pinned] write failed:", e); // ignore quota errors; best-effort
+      if (pinned.length === 0) {
+        localStorage.removeItem(PINNED_STORAGE_KEY);
+      } else {
+        localStorage.setItem(PINNED_STORAGE_KEY, JSON.stringify(pinned));
+      }
+    } catch {
+      // localStorage is best-effort only.
     }
   }, [pinned]);
 
-  // remove a symbol from pinned
-  const pinRemove = useCallback(
-    (s: string): void => {
-      setPinned((prev) => prev.filter((x) => x !== s));
-    },
-    [setPinned],
-  );
+  useEffect(() => {
+    const nextSymbol = normalizeSymbol(initialSymbol);
 
-  // Centralized backend base (adjust if your backend port changes)
-  const backendBase = useMemo(() => "", []);
-
-  // always resolve user input (name or symbol-ish) to a TICKER via backend search
-  const resolveToTicker = useCallback(async (input: string): Promise<string | null> => {
-    const q = (input ?? "").trim();
-    if (!q) return null;
-
-    try {
-      const resp = await fetch(`/api/companies?q=${encodeURIComponent(q)}&limit=1`, {
-        headers: { Accept: "application/json" },
-      });
-      if (!resp.ok) return null;
-
-      const arr = (await resp.json()) as Array<{ symbol?: string }>;
-      const sym = Array.isArray(arr) && arr.length > 0 ? arr[0]?.symbol : undefined;
-      return sym ? String(sym).toUpperCase() : null;
-    } catch {
-      return null; // best-effort; no fallback guess here
+    if (!nextSymbol || nextSymbol === confirmedSymbol) {
+      return;
     }
-  }, []);
 
-  // add current selection to pinned, always as a TICKER symbol
-  const pinAddCurrent = useCallback(async (): Promise<void> => {
-    // try resolving from current input; if that fails, fall back to currentSym
-    const resolved = (await resolveToTicker(symbol)) ?? currentSym;
-    if (!resolved) return;
+    if (document.activeElement !== inputRef.current) {
+      setSymbol(nextSymbol);
+    }
 
-    setPinned((prev) => (prev.includes(resolved) ? prev : [...prev, resolved]));
-  }, [symbol, currentSym, resolveToTicker, setPinned]);
-
-  // auto-hide all error pills after 5s (status lines stay)
-  useEffect(() => {
-    if (!liveErr && !fundSnapErr && !fundErr && !priceFetchErr) return;
-    const t = setTimeout(() => {
-      setLiveErr(null);
-      setFundSnapErr(null);
-      setFundErr(null);
-      setPriceFetchErr(null);
-    }, 5000);
-    return () => clearTimeout(t);
-  }, [liveErr, fundSnapErr, fundErr, priceFetchErr]);
-
-  // clear per-action status/errors/busy flags when switching company
-  const resetActionUi = useCallback((): void => {
-    // error pills
-    setPriceFetchErr(null);
-    setLiveErr(null);
-    setFundSnapErr(null);
-    setFundErr(null);
-
-    // snapshot/debug + live baseline
-    setFundRes(null);
-    setLive(null);
-    setBaseClose(null);
-  }, []);
-
-  // whenever the symbol changes, wipe action UI to avoid stale statuses
-  useEffect(() => {
-    resetActionUi();
-    // Also clear sparkline/sections until next load
-    setSpark([]);
+    isTypingRef.current = true;
+    setConfirmedSymbol("");
     setSections([]);
-  }, [resetActionUi, currentSym]);
+    setSparkline([]);
+    setError(null);
+    setBaseClose(null);
+    setLivePrice(null);
+  }, [initialSymbol, confirmedSymbol]);
 
-  // clear input + UI state and tell parent to deselect
-  const handleClear = useCallback((): void => {
-    typingRef.current = true; // block any auto-load
-    setSymbol(""); // empty the search field
-    setConfirmedSym(""); // no confirmed selection
-    resetActionUi(); // clear per-action UI
-    setSections([]); // hide analytics panels
-    setSpark([]); // hide sparkline
-    onSymbolChange?.(""); // tell parent to clear list/pin highlight
-    // optional: focus back to input for quick typing
-    searchRef.current?.focus();
-  }, [resetActionUi, onSymbolChange]);
-
-  // --- Main load routine (your existing body kept intact) ---
-  const load = useCallback(
-    async (symOverride?: string) => {
-      const sym = (symOverride ?? symbol).trim().toUpperCase(); // prefer explicit symbol if provided
-      localStorage.setItem(STORAGE_KEY, sym);
-      if (!sym) return;
-
-      // Do not load if user is currently typing in the search box
-      if (typingRef.current) return;
-
-      setLoading(true);
-      setErr(null);
-
-      // reset live delta when starting a fresh load
-      setLive(null);
-      setBaseClose(null);
-
-      try {
-        // 1) Latest price (already) …
-        const price = await getLatestCloseFromQuotes(sym);
-
-        // store base close for later live delta calculation
-        setBaseClose(price.value ?? null);
-
-        // 1b) Load timeseries (last 180 days) for sparkline, anchored to DB-latest date
-        try {
-          // prefer 'asOf' from cached latest; else query /api/Quotes/latest
-          const fromCached =
-            typeof price?.asOf === "string" && price.asOf.length >= 10
-              ? price.asOf.slice(0, 10)
-              : null;
-          const latestISO = fromCached ?? (await fetchLatestDateISO(backendBase));
-
-          let url: string;
-          if (latestISO) {
-            // DB-anchored [latest-180d .. latest]
-            const to = new Date(latestISO);
-            const from = new Date(to);
-            from.setDate(to.getDate() - 180);
-
-            const qs = new URLSearchParams({
-              symbol: sym,
-              from: fmt(from),
-              to: fmt(to),
-            });
-            url = `${backendBase}/api/quotes/timeseries?${qs.toString()}`;
-          } else {
-            // no anchor available → let backend use its default/fallback window
-            const qs = new URLSearchParams({ symbol: sym });
-            url = `${backendBase}/api/quotes/timeseries?${qs.toString()}`;
-          }
-
-          const tsResp = await fetch(url, { headers: { Accept: "application/json" } });
-
-          if (tsResp.ok) {
-            const raw: unknown = await tsResp.json();
-            const arr = Array.isArray(raw)
-              ? (raw as Array<{ date?: unknown; close?: unknown }>)
-              : [];
-
-            // defensive parse + chronological sort
-            const pts: TimeseriesPoint[] = arr
-              .map((r) => ({
-                date: typeof r?.date === "string" ? r.date : String(r?.date ?? ""),
-                close: typeof r?.close === "number" ? r.close : Number.NaN,
-              }))
-              .filter((p) => p.date && Number.isFinite(p.close))
-              .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
-
-            setSpark(pts);
-          } else {
-            setSpark([]);
-          }
-        } catch {
-          setSpark([]);
-        }
-        // 2) Fetch all other analytics metrics in parallel
-        const [
-          peRes,
-          roeRes,
-          fcfYieldRes,
-          netMarginRes,
-          dteRes,
-          eqRatioRes,
-          roaRes,
-          dtaRes,
-          epsRes,
-          bvpsRes,
-          pbRes,
-          atRes,
-          cagrRes,
-          fcfAbsRes,
-          oeRes,
-          oeYieldRes,
-          oepsRes,
-          pToOeRes,
-          fcfMarginRes,
-        ] = await Promise.all([
-          fetchMetricNumber(backendBase, "/api/analytics/pe", sym, ["value", "pe"]),
-          fetchMetricNumber(backendBase, "/api/analytics/roe", sym, ["value", "roe"]),
-          fetchMetricNumber(backendBase, "/api/analytics/fcf-yield", sym, ["value", "fcfYield"]),
-          fetchMetricNumber(backendBase, "/api/analytics/net-margin", sym, ["value", "netMargin"]),
-          fetchMetricNumber(backendBase, "/api/analytics/debt-to-equity", sym, [
-            "value",
-            "debtToEquity",
-          ]),
-          fetchMetricNumber(backendBase, "/api/analytics/equity-ratio", sym, [
-            "value",
-            "equityRatio",
-          ]),
-          fetchMetricNumber(backendBase, "/api/analytics/roa", sym, ["value", "roa"]),
-          fetchMetricNumber(backendBase, "/api/analytics/debt-to-assets", sym, [
-            "value",
-            "debtToAssets",
-          ]),
-          fetchMetricNumber(backendBase, "/api/analytics/eps", sym, ["value", "eps"]),
-          fetchMetricNumber(backendBase, "/api/analytics/bvps", sym, ["value", "bvps"]),
-          fetchMetricNumber(backendBase, "/api/analytics/pb", sym, ["value", "pb"]),
-          fetchMetricNumber(backendBase, "/api/analytics/asset-turnover", sym, [
-            "value",
-            "assetTurnover",
-          ]),
-          fetchMetricNumber(backendBase, "/api/analytics/equity-cagr", sym, [
-            "value",
-            "cagr",
-            "equityCagr",
-          ]),
-          fetchMetricNumber(backendBase, "/api/analytics/fcf", sym, ["value", "fcf"]),
-          fetchMetricNumber(backendBase, "/api/analytics/owner-earnings", sym, [
-            "value",
-            "ownerEarnings",
-          ]),
-          fetchMetricNumber(backendBase, "/api/analytics/owner-earnings-yield", sym, [
-            "value",
-            "ownerEarningsYield",
-          ]),
-          fetchMetricNumber(backendBase, "/api/analytics/oeps", sym, ["value", "oeps"]),
-          fetchMetricNumber(backendBase, "/api/analytics/p-to-oe", sym, [
-            "value",
-            "pToOe",
-            "pOverOe",
-          ]),
-          fetchMetricNumber(backendBase, "/api/analytics/fcf-margin", sym, ["value", "fcfMargin"]),
-        ]);
-
-        // fallback via stable snapshot if analytics endpoints had no data
-        let peValue = peRes.value;
-        let peHint = peRes.status === 200 ? undefined : `HTTP ${peRes.status}`;
-
-        let netMarginValue = netMarginRes.value;
-        let netMarginHint = netMarginRes.status === 200 ? undefined : `HTTP ${netMarginRes.status}`;
-
-        if (peRes.status !== 200 || netMarginRes.status !== 200) {
-          // prefer already-fetched snapshot from state to avoid extra call
-          let snapshot = fundRes?.status === 200 ? fundRes.data : null;
-
-          // If not present, fetch minimal snapshot (limit=1) with robust routing
-          if (!snapshot) {
-            const snap = await fetchFundamentalsSnapshot(sym, "annual", 1);
-            if (snap.status !== 200) {
-              setErr(
-                (prev) => prev ?? `Fundamentals snapshot fallback failed (HTTP ${snap.status})`,
-              );
-            }
-            snapshot = snap.data ?? null;
-          }
-
-          if (snapshot?.metrics) {
-            const m = snapshot.metrics as Record<string, unknown>;
-            const num = (k: string): number | null => {
-              const v = m[k];
-              return typeof v === "number" && Number.isFinite(v) ? v : null;
-            };
-
-            if (peRes.status !== 200) {
-              const peTtm = num("peRatioTTM") ?? num("peTTM") ?? num("pe");
-              if (peTtm != null) {
-                peValue = peTtm;
-                peHint = "from TTM (snapshot)";
-              }
-            }
-
-            if (netMarginRes.status !== 200) {
-              const nmTtm = num("netProfitMarginTTM") ?? num("netMarginTTM") ?? num("netMargin");
-              if (nmTtm != null) {
-                netMarginValue = nmTtm;
-                netMarginHint = "from TTM (snapshot)";
-              }
-            }
-          }
-        }
-
-        // Normalize UI sections (grouped)
-        const sectionsData: MetricSection[] = [
-          {
-            title: "Valuation",
-            items: [
-              {
-                label: "Price",
-                value: price.value ?? null, // ✅ pure number
-                baseUnit: price.unit ?? "USD",
-                hint:
-                  price.status === 200
-                    ? price.asOf
-                      ? `as of ${price.asOf}${price.adjusted ? " (adjusted)" : ""}`
-                      : undefined
-                    : `HTTP ${price.status}`,
-              },
-              { label: "P/E", value: peValue ?? null, hint: peHint },
-              {
-                label: "P/B",
-                value: pbRes.value ?? null,
-                hint: pbRes.status === 200 ? undefined : `HTTP ${pbRes.status}`,
-              },
-              {
-                label: "P/OE",
-                value: pToOeRes.value ?? null,
-                hint: pToOeRes.status === 200 ? undefined : `HTTP ${pToOeRes.status}`,
-              },
-            ],
-          },
-          {
-            title: "Profitability",
-            items: [
-              {
-                label: "ROE",
-                value: roeRes.value ?? null,
-                hint: roeRes.status === 200 ? undefined : `HTTP ${roeRes.status}`,
-              },
-              {
-                label: "ROA",
-                value: roaRes.value ?? null,
-                hint: roaRes.status === 200 ? undefined : `HTTP ${roaRes.status}`,
-              },
-              { label: "Net Margin", value: netMarginValue ?? null, hint: netMarginHint },
-              {
-                label: "FCF Yield",
-                value: fcfYieldRes.value ?? null,
-                hint: fcfYieldRes.status === 200 ? undefined : `HTTP ${fcfYieldRes.status}`,
-              },
-              {
-                label: "FCF Margin",
-                value: fcfMarginRes.value ?? null,
-                hint: fcfMarginRes.status === 200 ? undefined : `HTTP ${fcfMarginRes.status}`,
-              },
-              {
-                label: "OE Yield",
-                value: oeYieldRes.value ?? null,
-                hint: oeYieldRes.status === 200 ? undefined : `HTTP ${oeYieldRes.status}`,
-              },
-            ],
-          },
-          {
-            title: "Solvency / Leverage",
-            items: [
-              {
-                label: "Debt/Equity",
-                value: dteRes.value ?? null,
-                hint: dteRes.status === 200 ? undefined : `HTTP ${dteRes.status}`,
-              },
-              {
-                label: "Debt/Assets",
-                value: dtaRes.value ?? null,
-                hint: dtaRes.status === 200 ? undefined : `HTTP ${dtaRes.status}`,
-              },
-              {
-                label: "Equity Ratio",
-                value: eqRatioRes.value ?? null,
-                hint: eqRatioRes.status === 200 ? undefined : `HTTP ${eqRatioRes.status}`,
-              },
-            ],
-          },
-          {
-            title: "Efficiency & Growth",
-            items: [
-              {
-                label: "Asset Turnover",
-                value: atRes.value ?? null,
-                hint: atRes.status === 200 ? undefined : `HTTP ${atRes.status}`,
-              },
-              {
-                label: "Equity CAGR",
-                value: cagrRes.value ?? null,
-                hint: cagrRes.status === 200 ? undefined : `HTTP ${cagrRes.status}`,
-              },
-            ],
-          },
-          {
-            title: "Per Share",
-            items: [
-              {
-                label: "EPS",
-                value: epsRes.value ?? null, // ✅ no formatting here
-                baseUnit: price.unit ?? "USD",
-                hint: epsRes.status === 200 ? undefined : `HTTP ${epsRes.status}`,
-              },
-              {
-                label: "BVPS",
-                value: bvpsRes.value ?? null,
-                baseUnit: price.unit ?? "USD",
-                hint: bvpsRes.status === 200 ? undefined : `HTTP ${bvpsRes.status}`,
-              },
-              {
-                label: "OEPS",
-                value: oepsRes.value ?? null,
-                baseUnit: price.unit ?? "USD",
-                hint: oepsRes.status === 200 ? undefined : `HTTP ${oepsRes.status}`,
-              },
-            ],
-          },
-          {
-            title: "Cash Flow & Owner Earnings",
-            items: [
-              {
-                label: "FCF (abs)",
-                value: fcfAbsRes.value ?? null,
-                baseUnit: price.unit ?? "USD",
-                hint: fcfAbsRes.status === 200 ? undefined : `HTTP ${fcfAbsRes.status}`,
-              },
-              {
-                label: "Owner Earnings",
-                value: oeRes.value ?? null,
-                baseUnit: price.unit ?? "USD",
-                hint: oeRes.status === 200 ? undefined : `HTTP ${oeRes.status}`,
-              },
-            ],
-          },
-        ];
-
-        setBaseSections(sectionsData); // save numeric originals
-        setSections(sectionsData); // initial render
-      } catch (e: unknown) {
-        console.error("[panel] load failed:", e);
-        setErr("Fehler beim Laden der Kennzahlen.");
-        setSections([]); // clear sections on error
-      } finally {
-        setLoading(false);
-      }
-    },
-    [backendBase, symbol, fundRes],
-  );
-
-  // 🧩 Recalculate display values when currency changes
-  useEffect(() => {
-    if (baseSections.length === 0) return;
-
-    console.log(`[CurrencyChange] Updating values to ${currency}`);
-
-    const updated = baseSections.map((sec) => {
-      if (["Valuation", "Per Share", "Cash Flow & Owner Earnings"].includes(sec.title)) {
-        return {
-          ...sec,
-          items: sec.items.map((m) => {
-            if (typeof m.value === "number" && ["Price", "EPS", "BVPS", "OEPS"].includes(m.label)) {
-              return {
-                ...m,
-                value: formatMoneyFrom(m.value, safeCurrencyCode(m.baseUnit ?? "USD")),
-              };
-            }
-
-            if (typeof m.value === "string" && ["FCF (abs)", "Owner Earnings"].includes(m.label)) {
-              // extrahiere Zahl aus "12345 USD" → 12345
-              const num = parseFloat(m.value.replace(/[^\d.-]/g, ""));
-              if (!isNaN(num)) {
-                return {
-                  ...m,
-                  value: formatMoneyFrom(num, safeCurrencyCode(m.baseUnit ?? "USD")),
-                };
-              }
-            }
-
-            return m;
-          }),
-        };
-      }
-      return sec;
-    });
-
-    setSections(updated);
-  }, [currency, baseSections, formatMoneyFrom]);
-
-  // switch to a pinned symbol and trigger an immediate analytics load
-  const pinSwitch = useCallback(
-    (s: string): void => {
-      const sym = (s ?? "").trim();
-      if (!sym) return;
-
-      typingRef.current = false; // allow immediate load from pin
-
-      setSymbol(sym);
-      setConfirmedSym(sym);
-      resetActionUi(); // clear per-action UI for a fresh symbol view
-      setTimeout(() => {
-        load(sym).catch((err) => console.warn("[pinned] load failed:", err));
-      }, 0);
-    },
-    [load, resetActionUi, setSymbol],
-  );
-
-  // keep latest functions in refs so effects don't depend on them
-  const loadFnRef = useRef(load);
-  useEffect(() => {
-    loadFnRef.current = load;
-  }, [load]);
-
-  const resetFnRef = useRef(resetActionUi);
-  useEffect(() => {
-    resetFnRef.current = resetActionUi;
-  }, [resetActionUi]);
-
-  // Skip the very first non-empty initialSymbol from parent (no preselection on startup)
-  const skipFirstAdoptionRef = useRef(false);
-  useEffect(() => {
-    const up = (initialSymbol ?? "").trim().toUpperCase();
-    if (!up) return;
-
-    if (up === confirmedRef.current) return; // ignore parent echo of the already confirmed pin
-
-    if (skipFirstAdoptionRef.current) {
-      skipFirstAdoptionRef.current = false; // ignore the very first non-empty
-      lastInitialSymRef.current = up; // mark as seen so repeats won't adopt
-      return; // do not adopt/search-field-fill on initial startup
-    }
-
-    const inputFocused = searchRef.current != null && document.activeElement === searchRef.current;
-
-    if (!inputFocused) {
-      setSymbol(up); // reflect list click in the search field
-    }
-
-    resetFnRef.current?.(); // clear per-action UI
-    typingRef.current = true; // wait for explicit Load
-    setSections([]); // hide analytics panels
-    setSpark([]); // hide sparkline
-    setConfirmedSym(""); // not confirmed yet
-
-    // do NOT auto-load here; user must confirm with Load
-  }, [initialSymbol]);
-
-  // resolve query to a UNIQUE ticker; returns null if 0 or >1 matches
-  const resolveUniqueTicker = useCallback(
-    async (query: string): Promise<string | null> => {
-      const q = (query ?? "").trim();
-      if (!q) return null;
-
-      try {
-        // Ask backend for up to 2 hits; only accept when we get exactly 1
-        const resp = await fetch(`/api/companies?q=${encodeURIComponent(q)}&limit=2`, {
-          headers: { Accept: "application/json" },
-        });
-        if (!resp.ok) return null;
-
-        const arr = (await resp.json()) as Array<{ symbol?: string }>;
-
-        console.log("[resolveUniqueTicker] API result:", arr);
-
-        if (!Array.isArray(arr)) return null;
-
-        if (arr.length >= 1 && arr[0]?.symbol) {
-          return String(arr[0].symbol).toUpperCase(); // allow first match instead of strict unique
-        }
-        return null;
-      } catch {
-        console.error("[resolveUniqueTicker] ERROR:", err);
-        return null; // best-effort
-      }
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [backendBase],
-  );
-
-  const handleResolveAndLoad = useCallback(async (): Promise<void> => {
-    console.log("[handleResolveAndLoad] symbol =", symbol);
-    console.log("[handleResolveAndLoad] typeof resolveUniqueTicker =", typeof resolveUniqueTicker);
-
-    try {
-      const testResp = await fetch("/api/companies?q=AAPL&limit=1");
-      console.log("[handleResolveAndLoad] manual fetch ok?", testResp.ok, testResp.status);
-    } catch (err) {
-      console.error("[handleResolveAndLoad] manual fetch failed:", err);
-    }
-
-    const sym = await resolveUniqueTicker(symbol);
-
-    // Check recency of price data (from backend)
-    try {
-      const resp = await fetch(`/api/quotes/latest?symbol=${sym}`);
-      if (resp.ok) {
-        const data = await resp.json();
-
-        // ✅ handle array response (from /api/quotes/latest)
-        const latestEntry = Array.isArray(data) && data.length > 0 ? data[0] : null;
-        const lastUpdate = latestEntry?.date ? new Date(latestEntry.date) : null;
-
-        const tooOld = !lastUpdate || Date.now() - lastUpdate.getTime() > 1000 * 60 * 60 * 24; // older than 24h
-
-        if (tooOld) {
-          console.warn(
-            `[AnalyticsMiniPanel] ${sym}: price data outdated (last update: ${latestEntry?.date})`,
-          );
-          setAutoStatus(`⚠️ Price data outdated (last: ${latestEntry?.date}) → refreshing...`);
-
-          try {
-            // 🔄 Trigger refresh for this single symbol
-            const refreshResp = await fetchJson({
-              path: `/api/quotes/refresh?symbols=${sym}&range=30d`,
-              method: "POST",
-              timeoutMs: 45_000,
-            });
-
-            console.log(`[AnalyticsMiniPanel] ${sym}: refresh successful`, refreshResp);
-            setAutoStatus(`✅ Price data refreshed successfully`);
-
-            // 🟢 optional but recommended: reload the panel right away
-            await load(sym!);
-          } catch (err) {
-            console.error(`[AnalyticsMiniPanel] ${sym}: refresh failed`, err);
-            setAutoStatus(`⚠️ Could not refresh (API limit reached or network issue)`);
-          }
-        } else {
-          console.log(`[AnalyticsMiniPanel] ${sym}: price data fresh (as of ${latestEntry?.date})`);
-          setAutoStatus(`✅ Price data up to date (${latestEntry?.date})`);
-        }
-      }
-    } catch (err) {
-      console.error("Failed to check price recency:", err);
-    }
-
-    if (sym) {
-      setSymbol(sym);
-      resetActionUi();
-      typingRef.current = false;
-      await load(sym);
-      setConfirmedSym(sym);
-    } else {
-      resetActionUi();
-      setSections([]);
-      setSpark([]);
-      onSymbolChange?.("");
-    }
-  }, [
-    symbol,
-    resolveUniqueTicker,
-    resetActionUi,
-    load,
-    onSymbolChange,
-    setSections,
-    setSpark,
-    setSymbol,
-  ]);
-
-  // 🧩 Improved auto-refresh + auto-reload behavior (multi-line version)
-  const checkDataFreshness = useCallback(
-    async (sym: string) => {
-      console.info(`[auto-refresh] triggered for ${sym}`);
-      if (!sym) return;
-
-      // Reset UI
-      setAutoStatus("⚙️ Checking data freshness...");
-
-      // Local final messages
-      let priceLine = "";
-      let fundLine = "";
-      let analyticsLine = "";
-      let priceRefreshed = false;
-      let fundamentalsRefreshed = false;
-
-      // --- 1️⃣ Price freshness check ---
-      try {
-        const resp = await fetch(`/api/quotes/latest?symbol=${sym}`);
-        if (!resp || resp.type === "opaque") throw new Error("Fetch unreachable or CORS blocked");
-
-        if (resp.status === 404) {
-          const refreshResp = await fetchJson({
-            path: `/api/quotes/refresh?symbols=${sym}&range=30d`,
-            method: "POST",
-            timeoutMs: 45_000,
-          });
-          console.log(`[AnalyticsMiniPanel] ${sym}: initial price data fetched`, refreshResp);
-          priceLine = "✅ Price data fetched successfully";
-          priceRefreshed = true;
-        } else if (resp.ok) {
-          const data = await resp.json();
-          const latestEntry = Array.isArray(data) && data.length > 0 ? data[0] : null;
-          const lastUpdate = latestEntry?.date ? new Date(latestEntry.date) : null;
-          const tooOld = !lastUpdate || Date.now() - lastUpdate.getTime() > 1000 * 60 * 60 * 24;
-
-          if (tooOld) {
-            try {
-              const refreshResp = await fetchJson({
-                path: `/api/quotes/refresh?symbols=${sym}&range=30d`,
-                method: "POST",
-                timeoutMs: 45_000,
-              });
-              console.log(`[AnalyticsMiniPanel] ${sym}: price refresh successful`, refreshResp);
-              priceLine = "✅ Price data refreshed successfully";
-              priceRefreshed = true;
-            } catch (err) {
-              console.error(`[AnalyticsMiniPanel] ${sym}: price refresh failed`, err);
-              priceLine = "⚠️ Could not refresh price data (API limit or network issue)";
-            }
-          } else {
-            priceLine = `✅ Price data up to date (${latestEntry?.date})`;
-          }
-        } else {
-          priceLine = `⚠️ Could not check price freshness (HTTP ${resp.status})`;
-        }
-      } catch (err) {
-        console.error("[auto-refresh] price check failed:", err);
-        priceLine = "⚠️ Quotes API not reachable (CORS or backend down)";
-      }
-
-      // --- 2️⃣ Fundamentals freshness check ---
-      try {
-        const fundResp = await fetch(`/api/fundamentals/refresh?symbol=${sym}`, {
-          method: "POST",
-          headers: { Accept: "application/json" },
-        });
-
-        if (fundResp.ok) {
-          const fundData = await fundResp.json();
-          const totalInserted =
-            (fundData?.inserted?.income ?? 0) +
-            (fundData?.inserted?.balance ?? 0) +
-            (fundData?.inserted?.cash ?? 0);
-
-          if (totalInserted > 0) {
-            fundLine = "✅ Fundamentals updated successfully";
-            fundamentalsRefreshed = true;
-          } else {
-            const latestFundResp = await fetch(`/api/fundamentals/latest?symbol=${sym}`);
-            if (latestFundResp.ok) {
-              const latestFundData = await latestFundResp.json();
-              if (!latestFundData || Object.keys(latestFundData).length === 0) {
-                fundLine = "⚠️ No fundamentals data found — analytics may be empty";
-              } else {
-                fundLine = "✅ Fundamentals already up to date";
-              }
-            } else {
-              fundLine = "⚠️ Could not verify fundamentals presence";
-            }
-          }
-        } else if (fundResp.status === 429) {
-          fundLine = "⚠️ Fundamentals refresh skipped (API limit reached)";
-        } else if (fundResp.status === 404) {
-          fundLine = "🆕 No fundamentals in DB yet → fetching...";
-          fundamentalsRefreshed = true;
-        } else {
-          fundLine = `⚠️ Could not refresh fundamentals (HTTP ${fundResp.status})`;
-        }
-      } catch (err) {
-        console.error("[auto-refresh] fundamentals check failed:", err);
-        fundLine = "⚠️ Fundamentals API not reachable (CORS or backend down)";
-      }
-
-      // --- 3️⃣ Analytics reload ---
-      if (priceRefreshed || fundamentalsRefreshed) {
-        try {
-          await load(sym);
-          analyticsLine = "✅ Analytics successfully reloaded";
-        } catch (err) {
-          console.error("[auto-refresh] reload failed:", err);
-          analyticsLine = "⚠️ Reload failed — please retry manually";
-        }
-      } else {
-        analyticsLine = "✅ Analytics already up to date";
-      }
-
-      // 🧾 Display all final results together
-      setAutoStatus(`${priceLine}\n${fundLine}\n${analyticsLine}`);
-      setIsStatusExiting(false); // Reset exit state for new message
-    },
-    [load],
-  );
-
-  // 🕒 Auto-hide status after 7 seconds with smooth fade-out animation
   useEffect(() => {
     if (!autoStatus) {
       setIsStatusExiting(false);
       return;
     }
 
-    const hideTimer = setTimeout(() => {
-      setIsStatusExiting(true); // Trigger fade-out animation
-
-      // Remove status after animation completes
-      const removeTimer = setTimeout(() => {
-        setAutoStatus(null);
-        setIsStatusExiting(false);
-      }, 300); // Match animation duration
-
-      return () => clearTimeout(removeTimer);
+    const hideTimer = window.setTimeout(() => {
+      setIsStatusExiting(true);
     }, 7000);
 
-    return () => clearTimeout(hideTimer);
+    const removeTimer = window.setTimeout(() => {
+      setAutoStatus(null);
+      setIsStatusExiting(false);
+    }, 7300);
+
+    return () => {
+      window.clearTimeout(hideTimer);
+      window.clearTimeout(removeTimer);
+    };
   }, [autoStatus]);
 
-  useEffect(() => {
-    typingRef.current = true; // block any auto-load until user confirms
-    setSections([]); // hide analytics panels
-    setSpark([]); // hide sparkline
+  const clearPanel = useCallback(() => {
+    isTypingRef.current = true;
+    setSymbol("");
+    setConfirmedSymbol("");
+    setSections([]);
+    setSparkline([]);
+    setError(null);
+    setBaseClose(null);
+    setLivePrice(null);
+    setAutoStatus(null);
+    onSymbolChange?.("");
+    inputRef.current?.focus();
+  }, [onSymbolChange]);
+
+  const buildSections = useCallback(async (targetSymbol: string): Promise<MetricSection[]> => {
+    const price = await getLatestCloseFromQuotes(targetSymbol);
+    setBaseClose(price.value ?? null);
+
+    const anchorDate = price.asOf?.slice(0, 10) ?? (await fetchLatestDateISO(targetSymbol));
+    setSparkline(await fetchTimeseries(targetSymbol, anchorDate));
+
+    const [
+      peResult,
+      roeResult,
+      fcfYieldResult,
+      netMarginResult,
+      debtToEquityResult,
+      equityRatioResult,
+      roaResult,
+      debtToAssetsResult,
+      epsResult,
+      bvpsResult,
+      pbResult,
+      assetTurnoverResult,
+      equityCagrResult,
+      freeCashFlowResult,
+      ownerEarningsResult,
+      ownerEarningsYieldResult,
+      oepsResult,
+      priceToOwnerEarningsResult,
+      fcfMarginResult,
+    ] = await Promise.all([
+      fetchMetricNumber("/api/analytics/pe", targetSymbol, ["value", "pe"]),
+      fetchMetricNumber("/api/analytics/roe", targetSymbol, ["value", "roe"]),
+      fetchMetricNumber("/api/analytics/fcf-yield", targetSymbol, ["value", "fcfYield"]),
+      fetchMetricNumber("/api/analytics/net-margin", targetSymbol, ["value", "netMargin"]),
+      fetchMetricNumber("/api/analytics/debt-to-equity", targetSymbol, ["value", "debtToEquity"]),
+      fetchMetricNumber("/api/analytics/equity-ratio", targetSymbol, ["value", "equityRatio"]),
+      fetchMetricNumber("/api/analytics/roa", targetSymbol, ["value", "roa"]),
+      fetchMetricNumber("/api/analytics/debt-to-assets", targetSymbol, ["value", "debtToAssets"]),
+      fetchMetricNumber("/api/analytics/eps", targetSymbol, ["value", "eps"]),
+      fetchMetricNumber("/api/analytics/bvps", targetSymbol, ["value", "bvps"]),
+      fetchMetricNumber("/api/analytics/pb", targetSymbol, ["value", "pb"]),
+      fetchMetricNumber("/api/analytics/asset-turnover", targetSymbol, ["value", "assetTurnover"]),
+      fetchMetricNumber("/api/analytics/equity-cagr", targetSymbol, [
+        "value",
+        "cagr",
+        "equityCagr",
+      ]),
+      fetchMetricNumber("/api/analytics/fcf", targetSymbol, ["value", "fcf"]),
+      fetchMetricNumber("/api/analytics/owner-earnings", targetSymbol, [
+        "value",
+        "ownerEarnings",
+      ]),
+      fetchMetricNumber("/api/analytics/owner-earnings-yield", targetSymbol, [
+        "value",
+        "ownerEarningsYield",
+      ]),
+      fetchMetricNumber("/api/analytics/oeps", targetSymbol, ["value", "oeps"]),
+      fetchMetricNumber("/api/analytics/p-to-oe", targetSymbol, ["value", "pToOe", "pOverOe"]),
+      fetchMetricNumber("/api/analytics/fcf-margin", targetSymbol, ["value", "fcfMargin"]),
+    ]);
+
+    let peValue = peResult.value;
+    let peHint = metricHint(peResult.status);
+    let netMarginValue = netMarginResult.value;
+    let netMarginHint = metricHint(netMarginResult.status);
+
+    if (peValue === null || netMarginValue === null) {
+      const fallback = await fetchSnapshotMetricFallback(targetSymbol);
+
+      if (peValue === null && fallback.pe !== undefined) {
+        peValue = fallback.pe;
+        peHint = "from fundamentals snapshot";
+      }
+
+      if (netMarginValue === null && fallback.netMargin !== undefined) {
+        netMarginValue = fallback.netMargin;
+        netMarginHint = "from fundamentals snapshot";
+      }
+    }
+
+    return [
+      {
+        title: "Valuation",
+        items: [
+          {
+            label: "Price",
+            value: price.value ?? null,
+            hint:
+              price.status === 200
+                ? price.asOf
+                  ? `as of ${price.asOf}${price.adjusted ? " (adjusted)" : ""}`
+                  : undefined
+                : `HTTP ${price.status}`,
+          },
+          { label: "P/E", value: peValue ?? null, hint: peHint },
+          { label: "P/B", value: pbResult.value, hint: metricHint(pbResult.status) },
+          {
+            label: "P/OE",
+            value: priceToOwnerEarningsResult.value,
+            hint: metricHint(priceToOwnerEarningsResult.status),
+          },
+        ],
+      },
+      {
+        title: "Profitability",
+        items: [
+          { label: "ROE", value: roeResult.value, hint: metricHint(roeResult.status) },
+          { label: "ROA", value: roaResult.value, hint: metricHint(roaResult.status) },
+          { label: "Net Margin", value: netMarginValue ?? null, hint: netMarginHint },
+          {
+            label: "FCF Yield",
+            value: fcfYieldResult.value,
+            hint: metricHint(fcfYieldResult.status),
+          },
+          {
+            label: "FCF Margin",
+            value: fcfMarginResult.value,
+            hint: metricHint(fcfMarginResult.status),
+          },
+          {
+            label: "OE Yield",
+            value: ownerEarningsYieldResult.value,
+            hint: metricHint(ownerEarningsYieldResult.status),
+          },
+        ],
+      },
+      {
+        title: "Solvency / Leverage",
+        items: [
+          {
+            label: "Debt/Equity",
+            value: debtToEquityResult.value,
+            hint: metricHint(debtToEquityResult.status),
+          },
+          {
+            label: "Debt/Assets",
+            value: debtToAssetsResult.value,
+            hint: metricHint(debtToAssetsResult.status),
+          },
+          {
+            label: "Equity Ratio",
+            value: equityRatioResult.value,
+            hint: metricHint(equityRatioResult.status),
+          },
+        ],
+      },
+      {
+        title: "Efficiency & Growth",
+        items: [
+          {
+            label: "Asset Turnover",
+            value: assetTurnoverResult.value,
+            hint: metricHint(assetTurnoverResult.status),
+          },
+          {
+            label: "Equity CAGR",
+            value: equityCagrResult.value,
+            hint: metricHint(equityCagrResult.status),
+          },
+        ],
+      },
+      {
+        title: "Per Share",
+        items: [
+          { label: "EPS", value: epsResult.value, hint: metricHint(epsResult.status) },
+          { label: "BVPS", value: bvpsResult.value, hint: metricHint(bvpsResult.status) },
+          { label: "OEPS", value: oepsResult.value, hint: metricHint(oepsResult.status) },
+        ],
+      },
+      {
+        title: "Cash Flow & Owner Earnings",
+        items: [
+          {
+            label: "FCF (abs)",
+            value: freeCashFlowResult.value,
+            hint: metricHint(freeCashFlowResult.status),
+          },
+          {
+            label: "Owner Earnings",
+            value: ownerEarningsResult.value,
+            hint: metricHint(ownerEarningsResult.status),
+          },
+        ],
+      },
+    ];
   }, []);
 
-  useEffect(() => {
-    const s = confirmedSym;
-    if (!s || lastAnnouncedRef.current === s) return;
-    lastAnnouncedRef.current = s;
+  const load = useCallback(
+    async (targetSymbol: string) => {
+      const normalizedTarget = normalizeSymbol(targetSymbol);
+      if (!normalizedTarget || isTypingRef.current) return;
 
-    const id = requestAnimationFrame(() => {
-      onSymbolChange?.(s); // Parent sync happens AFTER the highlight was painted
+      setLoading(true);
+      setError(null);
+      setLivePrice(null);
+
+      try {
+        localStorage.setItem(STORAGE_KEY, normalizedTarget);
+        const nextSections = await buildSections(normalizedTarget);
+        setSections(nextSections);
+      } catch (loadError) {
+        console.error("[AnalyticsMiniPanel] Failed to load analytics:", loadError);
+        setError("Failed to load analytics data.");
+        setSections([]);
+        setSparkline([]);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [buildSections],
+  );
+
+  const checkDataFreshness = useCallback(
+    async (targetSymbol: string) => {
+      const normalizedTarget = normalizeSymbol(targetSymbol);
+      if (!normalizedTarget) return;
+
+      setAutoStatus("Checking data freshness...");
+      setIsStatusExiting(false);
+
+      let priceLine = "";
+      let fundamentalsLine = "";
+      let reloadLine = "";
+      let shouldReload = false;
+
+      try {
+        const response = await fetch(
+          `/api/quotes/latest?symbol=${encodeURIComponent(normalizedTarget)}&take=1`,
+          { headers: { Accept: "application/json" } },
+        );
+
+        if (response.status === 404) {
+          await refreshQuotes(normalizedTarget);
+          priceLine = "Price data fetched successfully";
+          shouldReload = true;
+        } else if (response.ok) {
+          const latestDate = getLatestQuoteDate(await response.json());
+          const lastUpdate = latestDate ? new Date(latestDate) : null;
+          const stale =
+            !lastUpdate || Date.now() - lastUpdate.getTime() > PRICE_STALE_AFTER_MS;
+
+          if (stale) {
+            await refreshQuotes(normalizedTarget);
+            priceLine = "Price data refreshed successfully";
+            shouldReload = true;
+          } else {
+            priceLine = `Price data up to date (${latestDate ?? "unknown date"})`;
+          }
+        } else {
+          priceLine = `Could not check price freshness (HTTP ${response.status})`;
+        }
+      } catch {
+        priceLine = "Could not refresh price data. Backend or provider may be unavailable.";
+      }
+
+      try {
+        const fundamentals = await refreshFundamentals(normalizedTarget);
+
+        if (!fundamentals) {
+          fundamentalsLine = "Fundamentals refresh skipped or unavailable";
+        } else {
+          const inserted =
+            (fundamentals.inserted?.income ?? 0) +
+            (fundamentals.inserted?.balance ?? 0) +
+            (fundamentals.inserted?.cash ?? 0);
+
+          if (inserted > 0) {
+            fundamentalsLine = "Fundamentals updated successfully";
+            shouldReload = true;
+          } else {
+            fundamentalsLine = "Fundamentals already up to date";
+          }
+        }
+      } catch {
+        fundamentalsLine = "Could not refresh fundamentals.";
+      }
+
+      if (shouldReload) {
+        try {
+          await load(normalizedTarget);
+          reloadLine = "Analytics reloaded";
+        } catch {
+          reloadLine = "Analytics reload failed. Please retry manually.";
+        }
+      } else {
+        reloadLine = "Analytics already up to date";
+      }
+
+      setAutoStatus(`${priceLine}\n${fundamentalsLine}\n${reloadLine}`);
+    },
+    [load],
+  );
+
+  useEffect(() => {
+    if (!confirmedSymbol) return;
+    if (lastFreshnessCheckRef.current === confirmedSymbol) return;
+
+    lastFreshnessCheckRef.current = confirmedSymbol;
+    onSymbolChange?.(confirmedSymbol);
+
+    void checkDataFreshness(confirmedSymbol);
+  }, [confirmedSymbol, checkDataFreshness, onSymbolChange]);
+
+  const handleResolveAndLoad = useCallback(async () => {
+    const resolvedSymbol = await resolveTicker(symbol);
+
+    if (!resolvedSymbol) {
+      setError("No matching company found.");
+      setSections([]);
+      setSparkline([]);
+      onSymbolChange?.("");
+      return;
+    }
+
+    isTypingRef.current = false;
+    setSymbol(resolvedSymbol);
+    setConfirmedSymbol(resolvedSymbol);
+    setError(null);
+
+    await load(resolvedSymbol);
+  }, [symbol, load, onSymbolChange]);
+
+  const handleInputKeyDown = useCallback(
+    async (event: KeyboardEvent<HTMLInputElement>) => {
+      if (event.key !== "Enter" || loading) {
+        return;
+      }
+
+      event.preventDefault();
+      await handleResolveAndLoad();
+    },
+    [handleResolveAndLoad, loading],
+  );
+
+  const handleInputChange = useCallback((value: string) => {
+    isTypingRef.current = true;
+    setSymbol(value);
+    setConfirmedSymbol("");
+    setSections([]);
+    setSparkline([]);
+    setError(null);
+    setBaseClose(null);
+    setLivePrice(null);
+  }, []);
+
+  const pinCurrent = useCallback(async () => {
+    const resolvedSymbol = (await resolveTicker(symbol)) ?? currentSymbol;
+    if (!resolvedSymbol) return;
+
+    setPinned((previous) => {
+      if (previous.includes(resolvedSymbol)) {
+        return previous;
+      }
+
+      return [...previous, resolvedSymbol].slice(0, MAX_PINNED_SYMBOLS);
     });
+  }, [symbol, currentSymbol]);
 
-    return () => cancelAnimationFrame(id);
-  }, [confirmedSym, onSymbolChange]);
+  const removePinned = useCallback((targetSymbol: string) => {
+    setPinned((previous) => previous.filter((item) => item !== targetSymbol));
+  }, []);
 
-  const confirmedRef = useRef<string>(""); // mirror of confirmedSym for effects that must not re-run
-  useEffect(() => {
-    confirmedRef.current = confirmedSym; // keep ref in sync with state
-  }, [confirmedSym]);
+  const switchPinned = useCallback(
+    async (targetSymbol: string) => {
+      const normalizedTarget = normalizeSymbol(targetSymbol);
+      if (!normalizedTarget) return;
 
-  // run auto-refresh check whenever a new symbol is confirmed (panel opened)
-  useEffect(() => {
-    if (!confirmedSym) return;
+      isTypingRef.current = false;
+      setSymbol(normalizedTarget);
+      setConfirmedSymbol(normalizedTarget);
+      setError(null);
 
-    // Prevent multiple runs for same symbol
-    if (lastAnnouncedRef.current === `freshness:${confirmedSym}`) return;
-    lastAnnouncedRef.current = `freshness:${confirmedSym}`;
-
-    checkDataFreshness(confirmedSym).catch((err) => {
-      console.warn("[auto-refresh] check failed:", err);
-      setAutoStatus("⚠️ Auto-refresh check failed");
-    });
-  }, [confirmedSym, checkDataFreshness]);
+      await load(normalizedTarget);
+    },
+    [load],
+  );
 
   return (
-    <div
-      style={{
-        border: "1px solid #222",
-        borderRadius: 14,
-        padding: 12,
-        display: "grid",
-        gap: 10,
-        width: "100%",
-        boxSizing: "border-box",
-        marginTop: 16,
-      }}
-    >
+    <div style={PANEL_STYLE}>
+      <AnalyticsStyles />
+
       <div style={{ fontWeight: 600 }}>Analytics</div>
 
-      {/* render pinned buttons */}
       <div
-        style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginBottom: 6 }}
+        style={{
+          display: "flex",
+          gap: 6,
+          flexWrap: "wrap",
+          alignItems: "center",
+          marginBottom: 6,
+        }}
       >
-        {pinned.map((s) => (
+        {pinned.map((pinnedSymbol) => (
           <div
-            key={s}
+            key={pinnedSymbol}
+            title={`Switch to ${pinnedSymbol}`}
             style={{
               display: "inline-flex",
               alignItems: "center",
@@ -1129,12 +915,12 @@ export default function AnalyticsMiniPanel({
               border: "1px solid #333",
               borderRadius: 999,
               padding: "2px 6px",
-              background: s === confirmedSym ? "#111" : "transparent",
+              background: pinnedSymbol === confirmedSymbol ? "#111" : "transparent",
             }}
-            title={`Switch to ${s}`}
           >
             <button
-              onClick={() => pinSwitch(s)}
+              type="button"
+              onClick={() => void switchPinned(pinnedSymbol)}
               style={{
                 padding: "2px 6px",
                 borderRadius: 8,
@@ -1145,12 +931,14 @@ export default function AnalyticsMiniPanel({
                 fontSize: 12,
               }}
             >
-              {s}
+              {pinnedSymbol}
             </button>
+
             <button
-              onClick={() => pinRemove(s)}
+              type="button"
+              onClick={() => removePinned(pinnedSymbol)}
               title="Remove"
-              aria-label={`Remove ${s}`}
+              aria-label={`Remove ${pinnedSymbol}`}
               style={{
                 padding: "0 6px",
                 borderRadius: 6,
@@ -1162,49 +950,38 @@ export default function AnalyticsMiniPanel({
                 lineHeight: 1,
               }}
             >
-              ×
+              x
             </button>
           </div>
         ))}
 
         <button
-          onClick={pinAddCurrent}
-          title={`Pin ${currentSym}`}
+          type="button"
+          onClick={() => void pinCurrent()}
+          title={currentSymbol ? `Pin ${currentSymbol}` : "Pin current symbol"}
+          disabled={!currentSymbol}
           style={{
             padding: "2px 8px",
             borderRadius: 999,
             border: "1px solid #333",
             background: "transparent",
             color: "inherit",
-            cursor: "pointer",
+            cursor: currentSymbol ? "pointer" : "not-allowed",
             fontSize: 12,
+            opacity: currentSymbol ? 1 : 0.5,
           }}
         >
           + Pin current
         </button>
       </div>
 
-      {/* Search bar + button */}
       <div style={{ display: "flex", gap: 8 }}>
         <input
-          ref={searchRef} // needed to know if input is focused
+          ref={inputRef}
           value={symbol}
-          onKeyDown={async (e) => {
-            if (e.key === "Enter" && !loading) {
-              e.preventDefault();
-              await handleResolveAndLoad(); // resolve unique + load or clear
-            }
-          }}
-          onChange={(e) => {
-            const v = e.target.value;
-            setSymbol(v); // keep raw typing in state (no normalization)
-            typingRef.current = true; // user started typing -> block auto-loads
-            setConfirmedSym("");
-            resetActionUi();
-            setSections([]);
-            setSpark([]);
-          }}
-          placeholder="Symbol or name (e.g., AMZN or Amazon)"
+          onKeyDown={(event) => void handleInputKeyDown(event)}
+          onChange={(event) => handleInputChange(event.target.value)}
+          placeholder="Symbol or name (e.g. AMZN or Amazon)"
           autoCapitalize="off"
           autoCorrect="off"
           spellCheck={false}
@@ -1215,13 +992,12 @@ export default function AnalyticsMiniPanel({
             border: "1px solid #333",
             background: "transparent",
             color: "inherit",
-            textTransform: "none", // ensure input preserves typed casing
-            fontVariantCaps: "normal", // avoid small-caps or other cap variants
           }}
         />
-        {/* clear current query and UI */}
+
         <button
-          onClick={handleClear}
+          type="button"
+          onClick={clearPanel}
           title="Clear search"
           aria-label="Clear search"
           style={{
@@ -1233,15 +1009,14 @@ export default function AnalyticsMiniPanel({
             whiteSpace: "nowrap",
           }}
         >
-          ×
+          x
         </button>
 
         <button
-          onClick={async () => {
-            if (loading) return;
-            await handleResolveAndLoad(); // same logic as Enter key
-          }}
+          type="button"
+          onClick={() => void handleResolveAndLoad()}
           disabled={loading}
+          title={currentSymbol ? `Load analytics for ${currentSymbol}` : "Load analytics"}
           style={{
             padding: "8px 12px",
             borderRadius: 10,
@@ -1250,13 +1025,11 @@ export default function AnalyticsMiniPanel({
             cursor: loading ? "default" : "pointer",
             whiteSpace: "nowrap",
           }}
-          title={`Load analytics for ${currentSym}`}
         >
           {loading ? "Loading..." : "Load"}
         </button>
       </div>
 
-      {/* animated status message for auto-refresh process */}
       {autoStatus && (
         <div
           style={{
@@ -1268,11 +1041,10 @@ export default function AnalyticsMiniPanel({
             border: "1px solid rgba(255, 255, 255, 0.1)",
             background:
               "linear-gradient(135deg, rgba(34, 197, 94, 0.08) 0%, rgba(59, 130, 246, 0.08) 100%)",
-            backdropFilter: "blur(8px)",
             boxShadow: "0 2px 8px rgba(0, 0, 0, 0.15)",
             animation: isStatusExiting
-              ? "fadeSlideOut 0.3s cubic-bezier(0.4, 0, 1, 1) forwards"
-              : "fadeSlideIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards",
+              ? "analyticsFadeSlideOut 0.3s cubic-bezier(0.4, 0, 1, 1) forwards"
+              : "analyticsFadeSlideIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards",
             whiteSpace: "pre-line",
             opacity: 0,
             transform: "translateY(-8px)",
@@ -1282,80 +1054,28 @@ export default function AnalyticsMiniPanel({
         </div>
       )}
 
-      {/* CSS keyframes for smooth animations */}
-      <style>
-        {`
-          @keyframes fadeSlideIn {
-            to {
-              opacity: 1;
-              transform: translateY(0);
-            }
-          }
-          
-          @keyframes fadeSlideOut {
-            from {
-              opacity: 1;
-              transform: translateY(0);
-            }
-            to {
-              opacity: 0;
-              transform: translateY(-8px);
-            }
-          }
-        `}
-      </style>
+      {error && (
+        <div role="alert" style={{ fontSize: 12, color: "#f87171", marginBottom: 8 }}>
+          {error}
+        </div>
+      )}
 
-      {err && <div style={{ fontSize: 12, color: "#f87171", marginBottom: 8 }}>{err}</div>}
+      <div style={GRID_STYLE}>
+        {sections.map((section) => (
+          <div key={section.title} style={{ gridColumn: "1 / -1" }}>
+            <SectionHeader section={section} />
 
-      {/* One grid for the whole panel; each section spans all columns */}
-      <div style={GRID}>
-        {sections.map((sec) => (
-          <div key={sec.title} style={{ gridColumn: "1 / -1" }}>
-            {/* Section header */}
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 6,
-                fontSize: 10,
-                opacity: 0.8,
-                margin: "6px 2px 2px",
-              }}
-            >
-              <span>{sec.title}</span>
-              <span
-                title="Available metrics in this section"
-                style={{
-                  border: "1px solid #333",
-                  borderRadius: 6,
-                  padding: "1px 6px",
-                  fontSize: 10,
-                  opacity: 0.75,
-                }}
-              >
-                {
-                  // count metrics that are not "n/a"
-                  (() => {
-                    const available = sec.items.filter((i) => i.value !== "n/a").length;
-                    return `${available}/${sec.items.length}`;
-                  })()
-                }
-              </span>
-            </div>
-
-            {/* Full-width row with as many columns as items */}
-            <div style={makeRowGrid(sec.items.length)}>
+            <div style={makeRowGrid(section.items.length)}>
               {loading
-                ? sec.items.map((m) => (
-                    <SkeletonCard key={`sk-${sec.title}-${m.label}`} label={m.label} />
+                ? section.items.map((metric) => (
+                    <SkeletonCard key={`skeleton-${section.title}-${metric.label}`} label={metric.label} />
                   ))
-                : sec.items.map((m) => (
-                    <div key={`${sec.title}-${m.label}`} style={CARD}>
-                      <div style={{ fontSize: 10, opacity: 0.8 }}>{m.label}</div>
+                : section.items.map((metric) => (
+                    <div key={`${section.title}-${metric.label}`} style={CARD_STYLE}>
+                      <div style={{ fontSize: 10, opacity: 0.8 }}>{metric.label}</div>
 
-                      {/* Value + optional live delta badge (only for Price) */}
                       <div
-                        // keep value and delta on one line, align baselines
+                        title={metric.hint}
                         style={{
                           fontSize: 16,
                           fontWeight: 600,
@@ -1363,36 +1083,36 @@ export default function AnalyticsMiniPanel({
                           alignItems: "baseline",
                           gap: 6,
                         }}
-                        title={m.hint ?? undefined}
                       >
-                        <span className={fadeClass}>{formatDisplayValue(m.label, m.value)}</span>
+                        <span className={fadeClass}>
+                          {formatDisplayValue(metric.label, metric.value)}
+                        </span>
 
-                        {m.label === "Price" &&
-                          live?.status === 200 &&
-                          typeof live.price === "number" &&
+                        {metric.label === "Price" &&
+                          typeof livePrice === "number" &&
                           typeof baseClose === "number" &&
                           baseClose > 0 && (
                             <span
-                              // delta vs last cached close (color up/down)
-                              title={`Live vs last close: ${live.price - baseClose >= 0 ? "+" : ""}${(live.price - baseClose).toFixed(2)}`}
+                              title={`Live vs last close: ${livePrice - baseClose >= 0 ? "+" : ""}${(
+                                livePrice - baseClose
+                              ).toFixed(2)}`}
                               style={{
                                 fontSize: 12,
                                 border: "1px solid #333",
                                 borderRadius: 6,
                                 padding: "0 6px",
-                                color: live.price - baseClose >= 0 ? "#22c55e" : "#f87171",
+                                color: livePrice - baseClose >= 0 ? "#22c55e" : "#f87171",
                                 whiteSpace: "nowrap",
                               }}
                             >
-                              {(((live.price - baseClose) / baseClose) * 100).toFixed(2)}%
+                              {(((livePrice - baseClose) / baseClose) * 100).toFixed(2)}%
                             </span>
                           )}
                       </div>
 
-                      {/* Hint row (keeps rows uniform; shows date or HTTP status) */}
-                      {m.hint && (
-                        <div style={HINT} title={m.hint}>
-                          {m.hint}
+                      {metric.hint && (
+                        <div style={HINT_STYLE} title={metric.hint}>
+                          {metric.hint}
                         </div>
                       )}
                     </div>
@@ -1402,8 +1122,7 @@ export default function AnalyticsMiniPanel({
         ))}
       </div>
 
-      {/* Price trend (sparkline) */}
-      {spark.length > 0 && (
+      {sparkline.length > 0 && (
         <div
           style={{
             border: "1px solid #333",
@@ -1414,10 +1133,9 @@ export default function AnalyticsMiniPanel({
         >
           <div style={{ fontSize: 12, opacity: 0.8, marginBottom: 6 }}>Price trend (180d)</div>
           <div style={{ width: "100%", height: 60 }}>
-            {/* pure SVG sparkline, no deps */}
             <svg viewBox="0 0 600 60" preserveAspectRatio="none" width="100%" height="100%">
               <polyline
-                points={buildPolyline(spark, 600, 50)}
+                points={buildPolyline(sparkline, 600, 50)}
                 fill="none"
                 stroke="currentColor"
                 strokeWidth="2"

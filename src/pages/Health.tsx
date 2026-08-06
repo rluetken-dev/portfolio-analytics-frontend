@@ -1,58 +1,58 @@
 import { useEffect, useState } from "react";
 
-import { fetchJson } from "../services/api/client";
+type HealthState = "loading" | "ok" | "unavailable";
 
 type HealthResponse = {
   status?: string;
 };
 
 export default function Health() {
-  const [status, setStatus] = useState("loading...");
+  const [status, setStatus] = useState<HealthState>("loading");
   const [error, setError] = useState<string | null>(null);
-  const [usesFallback, setUsesFallback] = useState(false);
 
   useEffect(() => {
-    let isMounted = true;
+    let cancelled = false;
 
-    const loadHealthStatus = async () => {
+    async function checkHealth() {
       try {
-        const response = await fetchJson<HealthResponse>({ path: "/health" });
+        const response = await fetch("/health", {
+          headers: { Accept: "application/json" },
+        });
 
-        if (!isMounted) {
-          return;
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
         }
 
-        setStatus(response.status ?? "unknown");
-        setError(null);
-        setUsesFallback(false);
-      } catch (error) {
-        if (!isMounted) {
-          return;
-        }
+        const data = (await response.json()) as HealthResponse;
 
-        setStatus("unavailable");
-        setError(error instanceof Error ? error.message : "Health check failed.");
-        setUsesFallback(true);
+        if (!cancelled) {
+          setStatus(data.status === "ok" ? "ok" : "unavailable");
+          setError(null);
+        }
+      } catch (healthError) {
+        if (!cancelled) {
+          setStatus("unavailable");
+          setError(healthError instanceof Error ? healthError.message : String(healthError));
+        }
       }
-    };
+    }
 
-    void loadHealthStatus();
+    void checkHealth();
 
     return () => {
-      isMounted = false;
+      cancelled = true;
     };
   }, []);
 
   return (
-    <main>
-      <h1>Health Check</h1>
+    <div>
+      <h2>Health Check</h2>
 
       <p>
         Status: <strong>{status}</strong>
-        {usesFallback && <span style={{ marginLeft: 8, color: "gray" }}>backend unreachable</span>}
       </p>
 
       {error && <p style={{ color: "red", marginTop: "0.5rem" }}>Error: {error}</p>}
-    </main>
+    </div>
   );
 }

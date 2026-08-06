@@ -49,10 +49,7 @@ export default function NavBar() {
 
   useEffect(() => {
     const closeCurrencyMenu = (event: MouseEvent) => {
-      if (
-        currencyMenuRef.current &&
-        !currencyMenuRef.current.contains(event.target as Node)
-      ) {
+      if (currencyMenuRef.current && !currencyMenuRef.current.contains(event.target as Node)) {
         setIsCurrencyMenuOpen(false);
       }
     };
@@ -65,6 +62,8 @@ export default function NavBar() {
     textDecoration: pathname === to ? "underline" : "none",
     fontWeight: pathname === to ? 700 : 400,
   });
+
+  const currencySymbol = formatMoneyFrom(0, currency).replace(/[\d.,\s]/g, "").trim() || "$";
 
   return (
     <nav style={navStyle} aria-label="Main navigation">
@@ -85,7 +84,7 @@ export default function NavBar() {
 
       <div style={{ flex: 1 }} />
 
-      {companySymbol && (
+      {isAuthenticated && companySymbol && (
         <Link
           to={`/company/${companySymbol}`}
           title={`Open details for ${companySymbol}`}
@@ -120,94 +119,93 @@ export default function NavBar() {
       )}
 
       {isAuthenticated && (
-        <div style={{ position: "relative" }}>
-          <details>
-            <summary
-              style={{
-                cursor: "pointer",
-                fontSize: 13,
-                color: "#15803d",
-                userSelect: "none",
-              }}
-            >
-              Funds
-            </summary>
-
-            <div
-              style={{
-                ...panelStyle,
-                top: "100%",
-                padding: 10,
-                marginTop: 4,
-                minWidth: 220,
-                display: "flex",
-                flexDirection: "column",
-                gap: 6,
-              }}
-            >
-              <FundsPanel
-                currencySymbol={formatMoneyFrom(0, currency).replace(/[\d.,]/g, "").trim() || "$"}
-                refreshBalance={refreshBalance}
-              />
-            </div>
-          </details>
-        </div>
-      )}
-
-      <div ref={currencyMenuRef} style={{ position: "relative" }}>
-        <button
-          type="button"
-          aria-haspopup="menu"
-          aria-expanded={isCurrencyMenuOpen}
-          onClick={() => setIsCurrencyMenuOpen((current) => !current)}
-          style={{
-            background: "#111",
-            border: "1px solid #444",
-            borderRadius: 6,
-            color: "white",
-            padding: "4px 10px",
-            cursor: "pointer",
-            fontSize: 13,
-          }}
-        >
-          {currency}
-        </button>
-
-        {isCurrencyMenuOpen && (
-          <div
-            role="menu"
-            style={{
-              ...panelStyle,
-              minWidth: 100,
-              overflow: "hidden",
-            }}
-          >
-            {supportedCurrencies.map((code) => (
-              <button
-                key={code}
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  setCurrency(code);
-                  setIsCurrencyMenuOpen(false);
-                }}
+        <>
+          <div style={{ position: "relative" }}>
+            <details>
+              <summary
                 style={{
-                  display: "block",
-                  width: "100%",
-                  padding: "6px 12px",
-                  border: 0,
                   cursor: "pointer",
-                  textAlign: "left",
-                  background: code === currency ? "#333" : "transparent",
-                  color: code === currency ? "#22c55e" : "white",
+                  fontSize: 13,
+                  color: "#15803d",
+                  userSelect: "none",
                 }}
               >
-                {code}
-              </button>
-            ))}
+                Funds
+              </summary>
+
+              <div
+                style={{
+                  ...panelStyle,
+                  top: "100%",
+                  padding: 10,
+                  marginTop: 4,
+                  minWidth: 220,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 6,
+                }}
+              >
+                <FundsPanel currencySymbol={currencySymbol} refreshBalance={refreshBalance} />
+              </div>
+            </details>
           </div>
-        )}
-      </div>
+
+          <div ref={currencyMenuRef} style={{ position: "relative" }}>
+            <button
+              type="button"
+              aria-haspopup="menu"
+              aria-expanded={isCurrencyMenuOpen}
+              onClick={() => setIsCurrencyMenuOpen((current) => !current)}
+              style={{
+                background: "#111",
+                border: "1px solid #444",
+                borderRadius: 6,
+                color: "white",
+                padding: "4px 10px",
+                cursor: "pointer",
+                fontSize: 13,
+              }}
+            >
+              {currency}
+            </button>
+
+            {isCurrencyMenuOpen && (
+              <div
+                role="menu"
+                style={{
+                  ...panelStyle,
+                  minWidth: 100,
+                  overflow: "hidden",
+                }}
+              >
+                {supportedCurrencies.map((code) => (
+                  <button
+                    key={code}
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setCurrency(code);
+                      setIsCurrencyMenuOpen(false);
+                    }}
+                    style={{
+                      display: "block",
+                      width: "100%",
+                      padding: "6px 12px",
+                      border: 0,
+                      cursor: "pointer",
+                      textAlign: "left",
+                      background: code === currency ? "#333" : "transparent",
+                      color: code === currency ? "#22c55e" : "white",
+                    }}
+                  >
+                    {code}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </>
+      )}
 
       <AuthBadge />
     </nav>

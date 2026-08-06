@@ -7,7 +7,6 @@ import AnalyticsMiniPanel from "../components/AnalyticsMiniPanel";
 import CompanyDiscovery from "../components/CompanyDiscovery";
 import ConfirmDialog from "../components/ConfirmDialog";
 import EditCompanyDialog from "../components/EditCompanyDialog";
-import InlineToast from "../components/InlineToast";
 import Notification from "../components/Notification";
 import { useUserBalance } from "../hooks/useUserBalance";
 import { fetchJson } from "../services/api/client";
@@ -123,6 +122,7 @@ const styles = {
     borderCollapse: "separate",
     borderSpacing: 0,
     width: "100%",
+    tableLayout: "fixed",
   } satisfies CSSProperties,
   tableHead: {
     position: "sticky",
@@ -145,6 +145,8 @@ const styles = {
     fontSize: 13,
     borderBottom: "1px solid #f1f5f9",
     whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
   } satisfies CSSProperties,
   tdRight: {
     padding: "8px 10px",
@@ -269,12 +271,8 @@ export default function Companies() {
   const [sortKey, setSortKey] = useState<SortKey>("symbol");
   const [sortDir, setSortDir] = useState<SortDir>("none");
 
-  const [refreshing, setRefreshing] = useState<Record<string, boolean>>({});
   const [selectedSymbol, setSelectedSymbol] = useState("");
   const [removedSymbol, setRemovedSymbol] = useState<string | null>(null);
-
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
-  const [toastType, setToastType] = useState<ToastType>("success");
 
   const [notification, setNotification] = useState<{
     message: string;
@@ -282,11 +280,11 @@ export default function Companies() {
   } | null>(null);
 
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
+  const [removeBlockedSymbol, setRemoveBlockedSymbol] = useState<string | null>(null);
   const [tradeTarget, setTradeTarget] = useState<SelectedCompany | null>(null);
 
   const showToast = useCallback((message: string, type: ToastType = "success") => {
-    setToastType(type);
-    setToastMessage(message);
+    setNotification({ message, type });
   }, []);
 
   const showNotification = useCallback((message: string, type: ToastType) => {
@@ -458,19 +456,6 @@ export default function Companies() {
     }
   }, [items, loading]);
 
-  const indexBySymbol = useMemo(() => {
-    const map = new Map<string, number>();
-
-    items.forEach((company, index) => {
-      const symbol = normalizeSymbol(company.symbol);
-      if (symbol) {
-        map.set(symbol, index);
-      }
-    });
-
-    return map;
-  }, [items]);
-
   const sectors = useMemo(() => {
     const uniqueSectors = new Set(items.map(getSector));
     return ["All", ...Array.from(uniqueSectors).sort()];
@@ -540,8 +525,8 @@ export default function Companies() {
   const sortIndicator = useCallback(
     (key: SortKey) => {
       if (sortKey !== key) return "";
-      if (sortDir === "asc") return " ▲";
-      if (sortDir === "desc") return " ▼";
+      if (sortDir === "asc") return " ^";
+      if (sortDir === "desc") return " v";
       return "";
     },
     [sortDir, sortKey],
@@ -563,41 +548,6 @@ export default function Companies() {
       setSelectedSymbol(normalizedSymbol);
     }
   }, []);
-
-  const refreshProfile = useCallback(
-    async (symbol: string) => {
-      const normalizedSymbol = normalizeSymbol(symbol);
-      if (!normalizedSymbol) return;
-
-      setRefreshing((current) => ({ ...current, [normalizedSymbol]: true }));
-
-      try {
-        const updated = await fetchJson<CompanySummary>({
-          path: `/api/companies/${encodeURIComponent(normalizedSymbol)}/refresh-profile`,
-          method: "POST",
-        });
-
-        const updatedSymbol = normalizeSymbol(updated.symbol);
-        const index = indexBySymbol.get(updatedSymbol);
-
-        if (index !== undefined) {
-          setItems((previous) => {
-            const next = [...previous];
-            next[index] = { ...previous[index], ...updated };
-            return next;
-          });
-        }
-      } catch (refreshError) {
-        showNotification(
-          `Failed to refresh ${normalizedSymbol}: ${parseErrorMessage(refreshError, "Unknown error")}`,
-          "error",
-        );
-      } finally {
-        setRefreshing((current) => ({ ...current, [normalizedSymbol]: false }));
-      }
-    },
-    [indexBySymbol, showNotification],
-  );
 
   const removeCompany = useCallback(
     async (target: DeleteTarget) => {
@@ -791,25 +741,53 @@ export default function Companies() {
         <div style={{ ...styles.card, padding: 0, marginTop: 6 }}>
           <div style={styles.tableWrap}>
             <table style={styles.table}>
+              <colgroup>
+                <col style={{ width: "12%" }} />
+                <col style={{ width: "24%" }} />
+                <col style={{ width: "22%" }} />
+                <col style={{ width: "10%" }} />
+                <col style={{ width: "14%" }} />
+                <col style={{ width: "18%" }} />
+              </colgroup>
+
               <thead style={styles.tableHead}>
                 <tr>
-                  {(["symbol", "name", "sector"] as const).map((key) => (
-                    <th
-                      key={key}
-                      style={styles.th}
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => toggleSort(key)}
-                      onKeyDown={(event) => handleSortableHeaderKeyDown(event, key)}
-                      aria-sort={ariaSort(key)}
-                      title={`Sort by ${key}`}
-                    >
-                      {key[0].toUpperCase()}
-                      {key.slice(1)}
-                      {sortIndicator(key)}
-                    </th>
-                  ))}
-                  <th style={{ ...styles.th, textAlign: "right" }}>Actions</th>
+                  <th
+                    style={styles.th}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => toggleSort("symbol")}
+                    onKeyDown={(event) => handleSortableHeaderKeyDown(event, "symbol")}
+                    aria-sort={ariaSort("symbol")}
+                    title="Sort by symbol"
+                  >
+                    Symbol{sortIndicator("symbol")}
+                  </th>
+                  <th
+                    style={styles.th}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => toggleSort("name")}
+                    onKeyDown={(event) => handleSortableHeaderKeyDown(event, "name")}
+                    aria-sort={ariaSort("name")}
+                    title="Sort by name"
+                  >
+                    Name{sortIndicator("name")}
+                  </th>
+                  <th
+                    style={styles.th}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => toggleSort("sector")}
+                    onKeyDown={(event) => handleSortableHeaderKeyDown(event, "sector")}
+                    aria-sort={ariaSort("sector")}
+                    title="Sort by sector"
+                  >
+                    Sector{sortIndicator("sector")}
+                  </th>
+                  <th style={{ ...styles.th, textAlign: "right" }}>Shares</th>
+                  <th style={{ ...styles.th, textAlign: "right" }}>Avg Price</th>
+                  <th style={{ ...styles.th, textAlign: "right" }} aria-label="Row actions" />
                 </tr>
               </thead>
 
@@ -817,117 +795,111 @@ export default function Companies() {
                 {sortedItems.map((company, index) => {
                   const symbol = normalizeSymbol(company.symbol);
                   const isSelected = selectedSymbol === symbol;
-                  const isBusy = Boolean(refreshing[symbol]);
-                  const needsRefresh = !company.name?.trim() || !company.sector?.trim();
                   const rowKey = company.id ?? `${symbol}-${index}`;
+                  const companyName = getCompanyName(company);
 
                   return (
                     <tr
                       key={rowKey}
                       data-symbol={symbol}
-                      role="button"
-                      tabIndex={0}
                       onClick={() => openAnalytics(symbol)}
-                      onKeyDown={(event) => {
-                        if ((event.key === "Enter" || event.key === " ") && symbol) {
-                          event.preventDefault();
-                          openAnalytics(symbol);
-                        }
-                      }}
                       aria-selected={isSelected || undefined}
                       style={{
                         cursor: symbol ? "pointer" : "default",
-                        ...(isSelected
-                          ? { outline: "1px solid #555", background: "rgba(0,0,0,0.03)" }
-                          : {}),
+                        ...(isSelected ? { background: "rgba(59, 130, 246, 0.08)" } : {}),
                       }}
                     >
                       <td style={{ ...styles.td, ...styles.mono }}>
                         {symbol ? <strong>{symbol}</strong> : "-"}
                       </td>
-                      <td style={styles.td}>{getCompanyName(company)}</td>
+                      <td style={styles.td}>{companyName}</td>
                       <td style={styles.td}>{getSector(company)}</td>
+                      <td style={styles.tdRight}>{company.shares ?? 0}</td>
+
+                      <td style={styles.tdRight}>
+                        {(company.shares ?? 0) > 0 && typeof company.purchasePrice === "number" && company.purchasePrice > 0
+                          ? `$${company.purchasePrice.toFixed(2)}`
+                          : "-"}
+                      </td>
+
                       <td
                         style={{
                           ...styles.tdRight,
-                          display: "flex",
-                          gap: 6,
-                          alignItems: "center",
-                          justifyContent: "flex-end",
+                          minWidth: 170,
                         }}
                       >
-                        {isSelected && (
-                          <>
-                            <button
-                              type="button"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                setTradeTarget({
-                                  symbol,
-                                  name: getCompanyName(company) === "-" ? symbol : getCompanyName(company),
-                                  shares: company.shares ?? 0,
-                                });
-                              }}
-                              title={`Trade ${symbol}`}
-                              aria-label={`Trade ${symbol}`}
-                              style={createActionButtonStyle("#2563eb")}
-                            >
-                              Trade
-                            </button>
+                        <div
+                          style={{
+                            display: "flex",
+                            gap: 6,
+                            alignItems: "center",
+                            justifyContent: "flex-end",
+                            minHeight: 20,
+                          }}
+                        >
+                          {isSelected && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  setTradeTarget({
+                                    symbol,
+                                    name: companyName === "-" ? symbol : companyName,
+                                    shares: company.shares ?? 0,
+                                  });
+                                }}
+                                title={`Trade ${symbol}`}
+                                aria-label={`Trade ${symbol}`}
+                                style={createActionButtonStyle("#2563eb")}
+                              >
+                                Trade
+                              </button>
 
-                            <button
-                              type="button"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                navigate(`/company/${symbol}`);
-                              }}
-                              title={`Open details for ${symbol}`}
-                              aria-label={`Open details for ${symbol}`}
-                              style={createActionButtonStyle("#16a34a")}
-                            >
-                              Details
-                            </button>
+                              <button
+                                type="button"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  navigate(`/company/${symbol}`);
+                                }}
+                                title={`Open details for ${symbol}`}
+                                aria-label={`Open details for ${symbol}`}
+                                style={createActionButtonStyle("#16a34a")}
+                              >
+                                Details
+                              </button>
 
-                            <button
-                              type="button"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                if (company.id != null) {
-                                  setDeleteTarget({ id: company.id, symbol });
+                              <button
+                                type="button"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+
+                                  if ((company.shares ?? 0) > 0) {
+                                  setRemoveBlockedSymbol(symbol);
+                                  return;
                                 }
-                              }}
-                              disabled={company.id == null}
-                              title={`Remove ${symbol} from your portfolio`}
-                              aria-label={`Remove ${symbol} from your portfolio`}
-                              style={{
-                                ...createActionButtonStyle("#dc2626"),
-                                ...(company.id == null ? styles.disabled : {}),
-                              }}
-                            >
-                              Remove
-                            </button>
-                          </>
-                        )}
 
-                        {needsRefresh ? (
-                          <button
-                            type="button"
-                            disabled={!symbol || isBusy}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              void refreshProfile(symbol);
-                            }}
-                            title="Fetch name and sector from the backend provider"
-                            style={{
-                              ...styles.button,
-                              ...(isBusy || !symbol ? styles.disabled : {}),
-                            }}
-                          >
-                            {isBusy ? "Refreshing..." : "Refresh profile"}
-                          </button>
-                        ) : (
-                          <span title="Profile up to date">OK</span>
-                        )}
+                                  if (company.id != null) {
+                                    setDeleteTarget({ id: company.id, symbol });
+                                  }
+                                }}
+                                disabled={company.id == null}
+                                title={
+                                  (company.shares ?? 0) > 0
+                                    ? "Sell all shares before removing this company"
+                                    : `Remove ${symbol} from your portfolio`
+                                }
+                                aria-label={`Remove ${symbol} from your portfolio`}
+                                style={{
+                                  ...createActionButtonStyle("#dc2626"),
+                                  ...(company.id == null ? styles.disabled : {}),
+                                }}
+                              >
+                                Remove
+                              </button>
+                            </>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -1014,6 +986,19 @@ export default function Companies() {
         />
       )}
 
+      {removeBlockedSymbol && (
+        <ConfirmDialog
+          isOpen
+          title="Cannot Remove Position"
+          message={`Sell all shares of ${removeBlockedSymbol} before removing it from your portfolio.`}
+          confirmText="OK"
+          cancelText="Cancel"
+          variant="warning"
+          onConfirm={() => setRemoveBlockedSymbol(null)}
+          onCancel={() => setRemoveBlockedSymbol(null)}
+        />
+      )}
+
       {tradeTarget && (
         <EditCompanyDialog
           symbol={tradeTarget.symbol}
@@ -1021,14 +1006,6 @@ export default function Companies() {
           currentShares={tradeTarget.shares}
           onCancel={() => setTradeTarget(null)}
           onConfirm={(data) => void handleTrade(data)}
-        />
-      )}
-
-      {toastMessage && (
-        <InlineToast
-          message={toastMessage}
-          type={toastType}
-          onClose={() => setToastMessage(null)}
         />
       )}
     </div>

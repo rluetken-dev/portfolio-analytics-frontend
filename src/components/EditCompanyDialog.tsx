@@ -1,6 +1,6 @@
 import { useEffect, useId, useState } from "react";
 
-import { getCurrentPrice } from "../services/api/quotes";
+import { getCurrentPrice, getLatestCloseFromQuotes } from "../services/api/quotes";
 
 interface EditCompanyDialogProps {
   symbol: string;
@@ -51,15 +51,30 @@ export default function EditCompanyDialog({
       setPriceMessage(null);
 
       try {
-        const quote: QuoteResponse = await getCurrentPrice(symbol);
+        const cachedQuote = await getLatestCloseFromQuotes(symbol);
 
         if (!isMounted) {
           return;
         }
 
-        if (quote.status === 200 && quote.price !== null && quote.price > 0) {
-          setCurrentPrice(quote.price);
-          setPurchasePrice(quote.price);
+        if (cachedQuote.status === 200 && cachedQuote.value !== null && cachedQuote.value > 0) {
+          setCurrentPrice(cachedQuote.value);
+          setPurchasePrice(cachedQuote.value);
+          setPriceMessage(
+            cachedQuote.asOf ? `Using cached demo price from ${cachedQuote.asOf}.` : "Using cached demo price.",
+          );
+          return;
+        }
+
+        const liveQuote: QuoteResponse = await getCurrentPrice(symbol);
+
+        if (!isMounted) {
+          return;
+        }
+
+        if (liveQuote.status === 200 && liveQuote.price !== null && liveQuote.price > 0) {
+          setCurrentPrice(liveQuote.price);
+          setPurchasePrice(liveQuote.price);
           return;
         }
 

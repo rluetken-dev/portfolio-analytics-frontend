@@ -130,7 +130,11 @@ function buildPolyline(points: TimeseriesPoint[], width: number, height: number)
 }
 
 function metricHint(status: number): string | undefined {
-  return status === 200 ? undefined : `HTTP ${status}`;
+  if (status === 200 || status === 400 || status === 404) {
+    return undefined;
+  }
+
+  return `HTTP ${status}`;
 }
 
 function isValidNumber(value: unknown): value is number {
@@ -600,11 +604,11 @@ export default function AnalyticsMiniPanel({
             label: "Price",
             value: price.value ?? null,
             hint:
-              price.status === 200
-                ? price.asOf
-                  ? `as of ${price.asOf}${price.adjusted ? " (adjusted)" : ""}`
-                  : undefined
-                : `HTTP ${price.status}`,
+            price.status === 200
+              ? price.asOf
+                ? `as of ${price.asOf}${price.adjusted ? " (adjusted)" : ""}`
+                : undefined
+              : price.status ? metricHint(price.status) : undefined,
           },
           { label: "P/E", value: peValue ?? null, hint: peHint },
           { label: "P/B", value: pbResult.value, hint: metricHint(pbResult.status) },

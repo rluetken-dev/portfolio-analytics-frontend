@@ -1,40 +1,77 @@
-// src/pages/Companies.tsx
-import { useEffect, useMemo, useRef, useState, useCallback } from "react";
-import type { CSSProperties } from "react";
-import { fetchJson } from "../services/api/client";
-import { Tooltip, ResponsiveContainer, Cell, PieChart, Pie } from "recharts";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties, KeyboardEvent } from "react";
 import { useNavigate } from "react-router-dom";
+import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
+
+import AnalyticsMiniPanel from "../components/AnalyticsMiniPanel";
 import CompanyDiscovery from "../components/CompanyDiscovery";
-import Notification from "../components/Notification";
 import ConfirmDialog from "../components/ConfirmDialog";
 import EditCompanyDialog from "../components/EditCompanyDialog";
 import InlineToast from "../components/InlineToast";
+import Notification from "../components/Notification";
 import { useUserBalance } from "../hooks/useUserBalance";
+import { fetchJson } from "../services/api/client";
 
-//import { getCurrentPrice } from "../services/api/quotes";
+type ToastType = "success" | "error" | "info";
+type SortKey = "symbol" | "name" | "sector";
+type SortDir = "asc" | "desc" | "none";
 
-// English comment: add the small analytics panel component
-import AnalyticsMiniPanel from "../components/AnalyticsMiniPanel";
+type CompanySummary = {
+  id?: string | number;
+  tickerId?: number;
+  symbol?: string;
+  name?: string | null;
+  sector?: string | null;
+  shares?: number | null;
+  purchasePrice?: number | null;
+  notes?: string | null;
+  lastPriceUpdate?: string | null;
+};
 
-/** ---------------------------------------------------------------
- * Local UI styles (compact, card-like, no extra dependencies)
- * --------------------------------------------------------------- */
+type SelectedCompany = {
+  symbol: string;
+  name: string;
+  shares: number;
+};
+
+type DeleteTarget = {
+  id: string | number;
+  symbol: string;
+};
+
+type TransactionDto = {
+  createdAt: string;
+  shares: number;
+  price: number | null;
+  notes: string | null;
+};
+
 const styles = {
-  page: { maxWidth: 1024, margin: "0 auto", padding: "16px" },
+  page: {
+    maxWidth: 1024,
+    margin: "0 auto",
+    padding: "16px",
+  } satisfies CSSProperties,
   headerRow: {
     display: "flex",
-    alignItems: "wrap",
+    alignItems: "center",
     justifyContent: "space-between",
+    flexWrap: "wrap",
+    gap: 12,
     marginBottom: 8,
-  },
-  title: { fontSize: 22, fontWeight: 600, margin: 0 },
+  } satisfies CSSProperties,
+  title: {
+    fontSize: 22,
+    fontWeight: 600,
+    margin: 0,
+  } satisfies CSSProperties,
   toolbar: {
     display: "flex",
     gap: 8,
     alignItems: "center",
-    padding: "6px 0", // EN: more breathing room
-  },
-
+    flexWrap: "wrap",
+    padding: "6px 0",
+  } satisfies CSSProperties,
   control: {
     height: 36,
     lineHeight: "36px",
@@ -43,23 +80,17 @@ const styles = {
     fontSize: 13,
     borderRadius: 10,
     padding: "0 10px",
-  } as CSSProperties,
-
+  } satisfies CSSProperties,
   input: {
-    padding: "0 10px",
+    minWidth: 220,
     background: "#fff",
     border: "1px solid #d4d4d8",
-  } as CSSProperties,
-
+  } satisfies CSSProperties,
   select: {
-    padding: "0 8px",
     border: "1px solid #d4d4d8",
-    WebkitAppearance: "none",
-    MozAppearance: "none",
-    appearance: "none",
-  } as CSSProperties,
-
-  btn: {
+    background: "#fff",
+  } satisfies CSSProperties,
+  button: {
     padding: "0 12px",
     borderRadius: 10,
     border: "1px solid #d4d4d8",
@@ -70,33 +101,35 @@ const styles = {
     alignItems: "center",
     justifyContent: "center",
     whiteSpace: "nowrap",
-  } as CSSProperties,
-  btnDisabled: { opacity: 0.55, cursor: "not-allowed" } as CSSProperties,
-  btnSoft: { background: "#fafafa" } as CSSProperties,
-
-  // Card wrapper for table and chart
+  } satisfies CSSProperties,
+  disabled: {
+    opacity: 0.55,
+    cursor: "not-allowed",
+  } satisfies CSSProperties,
   card: {
     border: "1px solid #e5e7eb",
     borderRadius: 14,
     padding: 12,
     background: "#fff",
     boxShadow: "0 1px 2px rgba(0,0,0,0.03)",
-  } as CSSProperties,
-
-  // Scrollable table container with sticky header
+  } satisfies CSSProperties,
   tableWrap: {
     border: "1px solid #e5e7eb",
     borderRadius: 12,
-    overflow: "hidden",
+    overflow: "auto",
     maxHeight: 420,
-    overflowY: "auto",
-  } as CSSProperties,
+  } satisfies CSSProperties,
   table: {
-    borderCollapse: "separate" as const,
+    borderCollapse: "separate",
     borderSpacing: 0,
     width: "100%",
-  } as CSSProperties,
-  thead: { position: "sticky", top: 0, zIndex: 1, background: "#f8fafc" } as CSSProperties,
+  } satisfies CSSProperties,
+  tableHead: {
+    position: "sticky",
+    top: 0,
+    zIndex: 1,
+    background: "#f8fafc",
+  } satisfies CSSProperties,
   th: {
     textAlign: "left",
     padding: "8px 10px",
@@ -105,36 +138,47 @@ const styles = {
     position: "sticky",
     top: 0,
     background: "#f8fafc",
-  } as CSSProperties,
+    userSelect: "none",
+  } satisfies CSSProperties,
   td: {
     padding: "8px 10px",
     fontSize: 13,
     borderBottom: "1px solid #f1f5f9",
     whiteSpace: "nowrap",
-  } as CSSProperties,
+  } satisfies CSSProperties,
   tdRight: {
     padding: "8px 10px",
     fontSize: 13,
     borderBottom: "1px solid #f1f5f9",
     whiteSpace: "nowrap",
     textAlign: "right",
-  } as CSSProperties,
+  } satisfies CSSProperties,
   mono: {
     fontFamily:
       "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
-  } as CSSProperties,
-
+  } satisfies CSSProperties,
   chartCard: {
     border: "1px solid #e5e7eb",
     borderRadius: 12,
     padding: 10,
     height: 280,
     background: "#fff",
-  } as CSSProperties,
-  subTitle: { margin: "10px 0 6px 0", fontWeight: 600 } as CSSProperties,
-  footnote: { fontSize: 12, color: "#666", marginTop: 6 } as CSSProperties,
-
-  legendWrap: { display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 } as CSSProperties,
+  } satisfies CSSProperties,
+  subTitle: {
+    margin: "10px 0 6px 0",
+    fontWeight: 600,
+  } satisfies CSSProperties,
+  footnote: {
+    fontSize: 12,
+    color: "#666",
+    marginTop: 6,
+  } satisfies CSSProperties,
+  legendWrap: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 8,
+  } satisfies CSSProperties,
   legendItem: {
     display: "flex",
     alignItems: "center",
@@ -143,19 +187,15 @@ const styles = {
     padding: "2px 8px",
     borderRadius: 9999,
     border: "1px solid #e5e7eb",
-  } as CSSProperties,
+  } satisfies CSSProperties,
   legendSwatch: {
     width: 10,
     height: 10,
     borderRadius: 2,
     display: "inline-block",
-  } as CSSProperties,
+  } satisfies CSSProperties,
+};
 
-  clearSlot: { width: 76, display: "inline-flex", justifyContent: "center" } as CSSProperties,
-  statusSlot: { minWidth: 80, fontSize: 12, color: "#666" } as CSSProperties,
-} as const;
-
-/** EN: Simple categorical palette (wraps via modulo). */
 const CHART_PALETTE = [
   "#3b82f6",
   "#22c55e",
@@ -163,7 +203,6 @@ const CHART_PALETTE = [
   "#ef4444",
   "#8b5cf6",
   "#14b8a6",
-  "#f7e19fff",
   "#06b6d4",
   "#a855f7",
   "#f97316",
@@ -174,454 +213,506 @@ const CHART_PALETTE = [
   "#6366f1",
 ];
 
-/** EN: Deterministic color by slice index (stable via order). */
-const colorByIndex = (i: number): string => CHART_PALETTE[i % CHART_PALETTE.length];
+function normalizeSymbol(value: string | null | undefined): string {
+  return (value ?? "").trim().toUpperCase();
+}
 
-/** ------------------------------------------------------------------
- * Shape returned by backend /api/companies (+ refresh-profile)
- * ------------------------------------------------------------------ */
-type CompanySummary = {
-  id?: string;
-  symbol?: string;
-  name?: string;
-  sector?: string;
-  shares: number;
-  lastPriceUpdate?: string | null;
-};
+function getCompanyName(company: CompanySummary): string {
+  const symbol = normalizeSymbol(company.symbol);
+  const name = company.name?.trim();
+
+  return name && name !== symbol ? name : "-";
+}
+
+function getSector(company: CompanySummary): string {
+  return company.sector?.trim() || "Unknown";
+}
+
+function colorByIndex(index: number): string {
+  return CHART_PALETTE[index % CHART_PALETTE.length];
+}
+
+function createActionButtonStyle(color: string): CSSProperties {
+  return {
+    padding: "2px 6px",
+    borderRadius: 8,
+    fontSize: 11,
+    lineHeight: 1.2,
+    cursor: "pointer",
+    border: `1px solid ${color}`,
+    background: `${color}1f`,
+    color,
+  };
+}
+
+function parseErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "string") return error;
+  return fallback;
+}
 
 export default function Companies() {
-  // Local state: list, loading, error, row-level refreshing, and batch state
+  const navigate = useNavigate();
+  const searchRef = useRef<HTMLInputElement>(null);
+  const autoRefreshCheckedRef = useRef(false);
+
+  const { cashBalance, deposit, withdraw, refreshBalance } = useUserBalance();
+
   const [items, setItems] = useState<CompanySummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const [query, setQuery] = useState("");
+  const [limit, setLimit] = useState(25);
+  const [sectorFilter, setSectorFilter] = useState("All");
+
+  const [sortKey, setSortKey] = useState<SortKey>("symbol");
+  const [sortDir, setSortDir] = useState<SortDir>("none");
+
   const [refreshing, setRefreshing] = useState<Record<string, boolean>>({});
-  const [query, setQuery] = useState<string>("");
-  const [limit, setLimit] = useState<number>(25); // EN: adjustable server page size
-  const [toastMsg, setToastMsg] = useState<string | null>(null);
-  const [toastType, setToastType] = useState<"success" | "error" | "info">("success");
-  const { cashBalance, deposit, withdraw, refreshBalance } = useUserBalance();
-
-  const [sectorFilter, setSectorFilter] = useState<string>("All"); // EN: Sector filter (All = no filter)
-
-  interface SelectedCompany {
-    symbol: string;
-    name: string;
-    shares: number;
-  }
-
-  const [buyDialogCompany, setBuyDialogCompany] = useState<SelectedCompany | null>(null);
-
-  // English: selected symbol to show in the analytics panel
-  const [selectedSymbol, setSelectedSymbol] = useState<string>("");
-
-  // Signal for child component (CompanyDiscovery) when something was deleted
+  const [selectedSymbol, setSelectedSymbol] = useState("");
   const [removedSymbol, setRemovedSymbol] = useState<string | null>(null);
+
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [toastType, setToastType] = useState<ToastType>("success");
 
   const [notification, setNotification] = useState<{
     message: string;
-    type: "success" | "error" | "info";
+    type: ToastType;
   } | null>(null);
 
-  // State for delete confirmation dialog
-  // Store both the open state and the specific company being deleted (with ID)
-  const [confirmDelete, setConfirmDelete] = useState<{
-    isOpen: boolean;
-    symbol: string;
-    id: string | number; // ✅ Include UserCompany ID for correct deletion
-  } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
+  const [tradeTarget, setTradeTarget] = useState<SelectedCompany | null>(null);
 
-  // English: anchor to scroll the analytics panel into view (optional)
-  const analyticsRef = useRef<HTMLDivElement | null>(null);
+  const showToast = useCallback((message: string, type: ToastType = "success") => {
+    setToastType(type);
+    setToastMessage(message);
+  }, []);
 
-  // English: set clicked symbol; scrolling will be handled by an effect
-  const openAnalytics = (sym: string): void => {
-    const up = (sym ?? "").trim().toUpperCase();
-    if (!up) return;
-    setSelectedSymbol(up);
-  };
+  const showNotification = useCallback((message: string, type: ToastType) => {
+    setNotification({ message, type });
+  }, []);
 
-  // Ref for focusing the search input via keyboard shortcut
-  const searchRef = useRef<HTMLInputElement>(null);
+  const loadCompanies = useCallback(
+    async (options?: { q?: string; limit?: number }) => {
+      const activeQuery = options?.q ?? query;
+      const activeLimit = options?.limit ?? limit;
 
-  /** Helper to refetch the list (centralizes side-effects).
-   *  Pure server-side search via ?q=... (symbol OR name, case-insensitive) */
-  const load = useCallback(
-    async (opts?: { q?: string; limit?: number }) => {
       setLoading(true);
       setError(null);
+
       try {
-        const raw = opts?.q?.trim() ?? query.trim(); // ✅ fallback to current query
-        const lim = opts?.limit ?? limit;
-
         const params = new URLSearchParams();
-        if (raw) params.set("q", raw);
-        if (lim) params.set("limit", String(lim));
 
-        const basePath = "/api/UserCompany";
-        const path = params.toString() ? `${basePath}?${params.toString()}` : basePath;
+        if (activeQuery.trim()) {
+          params.set("q", activeQuery.trim());
+        }
 
+        if (activeLimit > 0) {
+          params.set("limit", String(activeLimit));
+        }
+
+        const path = `/api/UserCompany${params.toString() ? `?${params.toString()}` : ""}`;
         const data = await fetchJson<CompanySummary[]>({ path });
+
         setItems(Array.isArray(data) ? data : []);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        setError(msg);
+      } catch (loadError) {
+        setError(parseErrorMessage(loadError, "Failed to load companies."));
       } finally {
         setLoading(false);
       }
     },
-    [limit, query], // ✅ query added
+    [limit, query],
   );
 
-  // English: Refresh all missing company profiles (server-driven batch, polite pacing)
   const refreshAllProfiles = useCallback(async () => {
-    try {
-      const batchSize = 10; // small polite batch to avoid API overload
-      let rounds = 0;
-      let totalUpdated = 0;
-      let lastRemaining = 0;
+    const batchSize = 10;
+    let rounds = 0;
+    let totalUpdated = 0;
+    let lastRemaining = 0;
 
+    try {
       while (rounds < 50) {
-        const res = await fetchJson<{ count: number; remaining?: number }>({
+        const result = await fetchJson<{ count: number; remaining?: number }>({
           path: `/api/companies/refresh-profiles?limit=${batchSize}`,
           method: "POST",
           timeoutMs: 45_000,
         });
 
-        const updatedNow = res?.count ?? 0;
+        const updatedNow = result.count ?? 0;
         totalUpdated += updatedNow;
-        lastRemaining = res?.remaining ?? 0;
+        lastRemaining = result.remaining ?? 0;
 
-        console.log(
-          `[refreshAllProfiles] round ${rounds + 1}: updated=${updatedNow}, remaining=${lastRemaining}`,
-        );
-
-        if (updatedNow === 0) break; // nothing more to refresh
+        if (updatedNow === 0) {
+          break;
+        }
 
         rounds += 1;
-        await new Promise((r) => setTimeout(r, 250)); // polite delay between batches
+        await new Promise((resolve) => window.setTimeout(resolve, 250));
       }
 
-      await load({ q: query }); // reload current list after refresh
+      await loadCompanies({ q: query });
 
-      console.log(
-        `[refreshAllProfiles] finished: totalUpdated=${totalUpdated}, remaining=${lastRemaining}`,
-      );
-
-      // return these values for autoRefreshProfiles (future step)
       return { totalUpdated, lastRemaining };
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error(`Batch refresh failed: ${msg}`);
-      return { totalUpdated: 0, lastRemaining: 0 };
+    } catch {
+      return { totalUpdated, lastRemaining };
     }
-  }, [load, query]);
+  }, [loadCompanies, query]);
 
-  // Automatically detect missing company metadata and trigger a background refresh
   const autoRefreshProfiles = useCallback(async () => {
-    try {
-      if (query.trim().length > 0) return; // don't auto-refresh during active search
+    if (query.trim()) return;
 
-      // English: Find companies without name or sector
-      const missing = items.filter((c) => !c.name?.trim() || !c.sector?.trim());
+    const missingProfiles = items.filter(
+      (company) => !company.name?.trim() || !company.sector?.trim(),
+    );
 
-      if (missing.length === 0) return; // nothing to update
+    if (missingProfiles.length === 0) return;
 
-      // English: Notify user that background update starts
-      setToastType("info");
-      setToastMsg(`Updating ${missing.length} company profiles...`);
+    showToast(`Updating ${missingProfiles.length} company profiles...`, "info");
 
-      // English: Trigger background batch refresh
-      const { totalUpdated, lastRemaining } = (await refreshAllProfiles()) ?? {
-        totalUpdated: 0,
-        lastRemaining: 0,
-      };
+    const { totalUpdated, lastRemaining } = await refreshAllProfiles();
 
-      // 🧠 Ensure backend updates are committed before reload (small delay)
-      await new Promise((r) => setTimeout(r, 400));
+    await new Promise((resolve) => window.setTimeout(resolve, 400));
+    await loadCompanies({ q: query || undefined });
 
-      // English: Now reload list with fresh data
-      await load({ q: query || undefined });
-
-      // English: Decide final message based on remaining count
-      if (lastRemaining > 0) {
-        // ⚠️ Inform user that API limit was reached
-        setToastType("info");
-        setToastMsg(
-          `Updated ${totalUpdated} company profiles, but ${lastRemaining} could not be refreshed due to API limits. Please try again later.`,
-        );
-      } else if (totalUpdated > 0) {
-        // ✅ Normal success case
-        setToastType("success");
-        setToastMsg(`Updated ${totalUpdated} company profiles successfully ✅`);
-      } else {
-        // ℹ️ Nothing needed update
-        setToastType("info");
-        setToastMsg("All company profiles are already up to date.");
-      }
-    } catch (err) {
-      console.error("Auto refresh failed:", err);
-      setToastType("error");
-      setToastMsg("Profile auto-update failed.");
+    if (lastRemaining > 0) {
+      showToast(
+        `Updated ${totalUpdated} company profiles, but ${lastRemaining} could not be refreshed due to provider limits.`,
+        "info",
+      );
+    } else if (totalUpdated > 0) {
+      showToast(`Updated ${totalUpdated} company profiles successfully.`, "success");
     }
-  }, [items, load, query, refreshAllProfiles]);
+  }, [items, loadCompanies, query, refreshAllProfiles, showToast]);
 
-  const showNotification = useCallback((message: string, type: "success" | "error" | "info") => {
-    setNotification({ message, type });
-  }, []);
-
-  const hideNotification = useCallback(() => {
-    setNotification(null);
-  }, []);
-
-  const handleCompanyAdded = useCallback(() => {
-    void load(); // reload companies list
-  }, [load]);
-
-  // Initial load on mount
   useEffect(() => {
-    void load();
-  }, [load]);
+    void loadCompanies();
+  }, [loadCompanies]);
 
-  // After initial load, check if some profiles need auto-refresh
   useEffect(() => {
-    // Run auto refresh only once after initial successful load
-    if (!loading && items.length > 0) {
-      const alreadyChecked = sessionStorage.getItem("autoRefreshDone");
-      if (!alreadyChecked) {
-        sessionStorage.setItem("autoRefreshDone", "1");
-        void autoRefreshProfiles();
-      }
+    if (loading || items.length === 0 || autoRefreshCheckedRef.current) {
+      return;
     }
-  }, [loading, items, autoRefreshProfiles]);
 
-  /** EN: Debounced search-as-you-type (skip initial render). */
-  const firstRun = useRef(true);
+    autoRefreshCheckedRef.current = true;
+    void autoRefreshProfiles();
+  }, [autoRefreshProfiles, items.length, loading]);
+
   useEffect(() => {
-    if (firstRun.current) {
-      firstRun.current = false;
-      return; // skip initial run
-    }
-    const handle = setTimeout(() => {
-      void load({ q: query }); // EN: load reads current limit internally
+    const handle = window.setTimeout(() => {
+      void loadCompanies({ q: query });
     }, 300);
-    return () => clearTimeout(handle);
-  }, [query, load]);
+
+    return () => window.clearTimeout(handle);
+  }, [query, loadCompanies]);
 
   useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
+    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
       const isMac = navigator.platform.toUpperCase().includes("MAC");
 
-      // Ctrl/⌘ + K → Focus on search field
-      if ((isMac ? e.metaKey : e.ctrlKey) && e.key.toLowerCase() === "k") {
-        e.preventDefault();
+      if ((isMac ? event.metaKey : event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
         searchRef.current?.focus();
         return;
       }
 
-      // Esc in the search field → clear + immediately load full list
-      if (e.key === "Escape" && document.activeElement === searchRef.current) {
-        e.preventDefault();
+      if (event.key === "Escape" && document.activeElement === searchRef.current) {
+        event.preventDefault();
         setQuery("");
-        void load({}); // EN: immediate return to the complete list
+        void loadCompanies({ q: "" });
       }
     };
 
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [load]);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [loadCompanies]);
 
-  /** Quick index to find/update rows by their symbol. */
+  useEffect(() => {
+    if (loading) return;
+
+    const validSymbols = new Set(
+      items.map((company) => normalizeSymbol(company.symbol)).filter(Boolean),
+    );
+
+    try {
+      const rawPins = localStorage.getItem("analytics:pinned");
+      const pins = rawPins ? (JSON.parse(rawPins) as unknown) : [];
+      const normalizedPins = Array.isArray(pins)
+        ? pins.map((item) => normalizeSymbol(String(item))).filter(Boolean)
+        : [];
+
+      const prunedPins = normalizedPins.filter((symbol) => validSymbols.has(symbol));
+
+      if (prunedPins.length === 0) {
+        localStorage.removeItem("analytics:pinned");
+      } else if (JSON.stringify(prunedPins) !== JSON.stringify(normalizedPins)) {
+        localStorage.setItem("analytics:pinned", JSON.stringify(prunedPins));
+      }
+
+      const lastSymbol = normalizeSymbol(localStorage.getItem("analytics:lastSymbol"));
+      if (lastSymbol && !validSymbols.has(lastSymbol)) {
+        localStorage.removeItem("analytics:lastSymbol");
+      }
+    } catch {
+      localStorage.removeItem("analytics:pinned");
+    }
+  }, [items, loading]);
+
   const indexBySymbol = useMemo(() => {
     const map = new Map<string, number>();
-    items.forEach((c, i) => {
-      if (c.symbol) map.set(c.symbol, i);
+
+    items.forEach((company, index) => {
+      const symbol = normalizeSymbol(company.symbol);
+      if (symbol) {
+        map.set(symbol, index);
+      }
     });
+
     return map;
   }, [items]);
 
-  /** Refresh a single profile (name + sector) by symbol. */
-  const refreshProfile = async (symbol: string) => {
-    if (!symbol) return;
-
-    setRefreshing((m) => ({ ...m, [symbol]: true }));
-    try {
-      const updated = await fetchJson<CompanySummary>({
-        path: `/api/companies/${encodeURIComponent(symbol)}/refresh-profile`,
-        method: "POST",
-      });
-      if (updated?.symbol) {
-        const idx = indexBySymbol.get(updated.symbol);
-        if (idx !== undefined) {
-          setItems((prev) => {
-            const next = [...prev];
-            next[idx] = { ...prev[idx], ...updated };
-            return next;
-          });
-        }
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      alert(`Failed to refresh ${symbol}: ${msg}`);
-    } finally {
-      setRefreshing((m) => ({ ...m, [symbol]: false }));
-    }
-  };
-
-  // Remove a UserCompany safely after confirmation
-  const removeCompany = useCallback(
-    async (id: string | number, symbol: string) => {
-      if (!id) return;
-
-      try {
-        // ✅ Trigger update signal for discovery component
-        setRemovedSymbol(symbol.toUpperCase());
-        setTimeout(() => setRemovedSymbol(null), 500);
-
-        // ✅ Call correct endpoint to remove only the UserCompany relationship
-        await fetchJson({
-          path: `/api/UserCompany/${id}`,
-          method: "DELETE",
-        });
-
-        // Refresh the companies list (optional — keeps state in sync)
-        await load({ q: query });
-
-        // Show success notification
-        showNotification(`Company ${symbol} removed from your portfolio`, "success");
-
-        // Clear selection if the removed company was selected
-        if (selectedSymbol === symbol) {
-          setSelectedSymbol("");
-        }
-
-        // Close the confirm dialog
-        setConfirmDelete(null);
-      } catch (error) {
-        console.error("Remove failed:", error);
-
-        // Show error notification
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        if (errorMessage.includes("not found")) {
-          showNotification(`Company ${symbol} not found in your portfolio`, "error");
-        } else {
-          showNotification(`Failed to remove ${symbol}`, "error");
-        }
-      }
-    },
-    [load, query, selectedSymbol, showNotification],
-  );
-
-  // EN: Unique sectors from current data (sorted, with "All" first)
   const sectors = useMemo(() => {
-    const set = new Set<string>();
-    for (const c of items) set.add(c.sector?.trim() || "Unknown");
-    return ["All", ...Array.from(set).sort()];
+    const uniqueSectors = new Set(items.map(getSector));
+    return ["All", ...Array.from(uniqueSectors).sort()];
   }, [items]);
 
-  // EN: Apply sector filter before sorting
   const filteredItems = useMemo(() => {
-    if (sectorFilter === "All") return items;
-    return items.filter((c) => (c.sector?.trim() || "Unknown") === sectorFilter);
+    if (sectorFilter === "All") {
+      return items;
+    }
+
+    return items.filter((company) => getSector(company) === sectorFilter);
   }, [items, sectorFilter]);
 
-  // EN: Sort state (column + direction)
-  type SortKey = "symbol" | "name" | "sector";
-  type SortDir = "asc" | "desc" | "none";
-
-  // EN: Locale-aware, case-insensitive, natural sorting (e.g., A2 < A10)
   const collator = useMemo(
     () => new Intl.Collator(undefined, { numeric: true, sensitivity: "base" }),
     [],
   );
 
-  const [sortKey, setSortKey] = useState<SortKey>("symbol"); // EN: default
-  const [sortDir, setSortDir] = useState<SortDir>("none"); // EN: none = as-loaded
-
-  // EN: Toggle sort direction in a cycle: none -> asc -> desc -> none
-  const toggleSort = (key: SortKey) => {
-    setSortKey(key);
-    setSortDir((prev) => {
-      if (sortKey !== key) return "asc"; // EN: new column starts asc
-      if (prev === "none") return "asc";
-      if (prev === "asc") return "desc";
-      return "none";
-    });
-  };
-
-  // EN: Memoized sorted list (pure client-side)
   const sortedItems = useMemo(() => {
-    const get = (c: CompanySummary, k: SortKey) => (c[k] ?? "").toString().trim();
-    if (sortDir === "none") return filteredItems;
+    if (sortDir === "none") {
+      return filteredItems;
+    }
 
-    const dir = sortDir === "asc" ? 1 : -1;
-    const out = [...filteredItems];
+    const direction = sortDir === "asc" ? 1 : -1;
+    const sorted = [...filteredItems];
 
-    out.sort((a, b) => {
-      const av = get(a, sortKey);
-      const bv = get(b, sortKey);
+    sorted.sort((a, b) => {
+      const aValue = String(a[sortKey] ?? "").trim();
+      const bValue = String(b[sortKey] ?? "").trim();
 
-      const aEmpty = av.length === 0;
-      const bEmpty = bv.length === 0;
-      if (aEmpty && !bEmpty) return 1; // EN: nulls/empties last
-      if (!aEmpty && bEmpty) return -1;
-      if (aEmpty && bEmpty) return 0;
+      if (!aValue && bValue) return 1;
+      if (aValue && !bValue) return -1;
+      if (!aValue && !bValue) return 0;
 
-      return collator.compare(av, bv) * dir; // EN: natural, locale-aware
+      return collator.compare(aValue, bValue) * direction;
     });
 
-    return out;
-  }, [filteredItems, sortKey, sortDir, collator]);
+    return sorted;
+  }, [collator, filteredItems, sortDir, sortKey]);
 
-  // EN: sector aggregation should reflect current filter
   const sectorData = useMemo(() => {
     const counts = new Map<string, number>();
-    for (const c of filteredItems) {
-      const key = c.sector?.trim() || "Unknown";
-      counts.set(key, (counts.get(key) ?? 0) + 1);
+
+    for (const company of filteredItems) {
+      const sector = getSector(company);
+      counts.set(sector, (counts.get(sector) ?? 0) + 1);
     }
+
     return Array.from(counts.entries())
       .map(([sector, count]) => ({ sector, count }))
       .sort((a, b) => b.count - a.count);
   }, [filteredItems]);
 
-  const navigate = useNavigate(); // imperative navigation handler
+  const toggleSort = useCallback(
+    (key: SortKey) => {
+      setSortKey(key);
+      setSortDir((previous) => {
+        if (sortKey !== key) return "asc";
+        if (previous === "none") return "asc";
+        if (previous === "asc") return "desc";
+        return "none";
+      });
+    },
+    [sortKey],
+  );
 
-  // English: keep localStorage pins aligned with the current companies list
-  useEffect(() => {
-    if (loading) return; // wait until first load has finished
+  const sortIndicator = useCallback(
+    (key: SortKey) => {
+      if (sortKey !== key) return "";
+      if (sortDir === "asc") return " ▲";
+      if (sortDir === "desc") return " ▼";
+      return "";
+    },
+    [sortDir, sortKey],
+  );
 
-    // English: valid symbols from current table
-    const valid = new Set(items.map((c) => (c.symbol ?? "").toUpperCase().trim()).filter(Boolean));
+  const ariaSort = useCallback(
+    (key: SortKey): "ascending" | "descending" | "none" => {
+      if (sortKey !== key) return "none";
+      if (sortDir === "asc") return "ascending";
+      if (sortDir === "desc") return "descending";
+      return "none";
+    },
+    [sortDir, sortKey],
+  );
 
-    // English: read & normalize current pins
-    let pins: string[] = [];
-    try {
-      const raw = localStorage.getItem("analytics:pinned");
-      pins = raw ? JSON.parse(raw) : [];
-    } catch {
-      // English: treat invalid JSON as no pins
-      pins = [];
+  const openAnalytics = useCallback((symbol: string) => {
+    const normalizedSymbol = normalizeSymbol(symbol);
+    if (normalizedSymbol) {
+      setSelectedSymbol(normalizedSymbol);
     }
+  }, []);
 
-    const norm = pins.map((s) => String(s).toUpperCase().trim()).filter(Boolean);
-    const pruned = norm.filter((sym) => valid.has(sym));
+  const refreshProfile = useCallback(
+    async (symbol: string) => {
+      const normalizedSymbol = normalizeSymbol(symbol);
+      if (!normalizedSymbol) return;
 
-    // English: write back only when needed
-    if (pruned.length === 0) {
-      localStorage.removeItem("analytics:pinned");
-    } else if (JSON.stringify(pruned) !== JSON.stringify(norm)) {
-      localStorage.setItem("analytics:pinned", JSON.stringify(pruned));
-    }
+      setRefreshing((current) => ({ ...current, [normalizedSymbol]: true }));
 
-    // English: clear lastSymbol if it is not present anymore
-    const last = (localStorage.getItem("analytics:lastSymbol") ?? "").toUpperCase().trim();
-    if (last && !valid.has(last)) {
-      localStorage.removeItem("analytics:lastSymbol");
-    }
-  }, [items, loading]);
+      try {
+        const updated = await fetchJson<CompanySummary>({
+          path: `/api/companies/${encodeURIComponent(normalizedSymbol)}/refresh-profile`,
+          method: "POST",
+        });
 
-  // --- Render states ---
-  if (error) return <p style={{ color: "red" }}>Error: {error}</p>;
+        const updatedSymbol = normalizeSymbol(updated.symbol);
+        const index = indexBySymbol.get(updatedSymbol);
+
+        if (index !== undefined) {
+          setItems((previous) => {
+            const next = [...previous];
+            next[index] = { ...previous[index], ...updated };
+            return next;
+          });
+        }
+      } catch (refreshError) {
+        showNotification(
+          `Failed to refresh ${normalizedSymbol}: ${parseErrorMessage(refreshError, "Unknown error")}`,
+          "error",
+        );
+      } finally {
+        setRefreshing((current) => ({ ...current, [normalizedSymbol]: false }));
+      }
+    },
+    [indexBySymbol, showNotification],
+  );
+
+  const removeCompany = useCallback(
+    async (target: DeleteTarget) => {
+      try {
+        setRemovedSymbol(target.symbol);
+        window.setTimeout(() => setRemovedSymbol(null), 500);
+
+        await fetchJson({
+          path: `/api/UserCompany/${target.id}`,
+          method: "DELETE",
+        });
+
+        await loadCompanies({ q: query });
+
+        if (selectedSymbol === target.symbol) {
+          setSelectedSymbol("");
+        }
+
+        setDeleteTarget(null);
+        showNotification(`Company ${target.symbol} removed from your portfolio`, "success");
+      } catch (removeError) {
+        const message = parseErrorMessage(removeError, "Failed to remove company.");
+        showNotification(message.includes("not found") ? `${target.symbol} not found` : message, "error");
+      }
+    },
+    [loadCompanies, query, selectedSymbol, showNotification],
+  );
+
+  const handleCompanyAdded = useCallback(() => {
+    void loadCompanies();
+  }, [loadCompanies]);
+
+  const handleTrade = useCallback(
+    async (data: { shares: number; purchasePrice?: number | null; notes: string }) => {
+      if (!tradeTarget) return;
+
+      try {
+        const finalPrice =
+          typeof data.purchasePrice === "number" && data.purchasePrice > 0
+            ? data.purchasePrice
+            : null;
+
+        const totalValue = Math.abs(data.shares) * (finalPrice ?? 0);
+
+        if (data.shares > 0 && cashBalance != null && totalValue > cashBalance + 0.0001) {
+          showToast("Insufficient funds.", "error");
+          return;
+        }
+
+        const transaction = await fetchJson<
+          TransactionDto,
+          { symbol: string; shares: number; price: number | null; notes: string }
+        >({
+          path: "/api/UserCompanyTransactions",
+          method: "POST",
+          body: {
+            symbol: tradeTarget.symbol,
+            shares: data.shares,
+            price: finalPrice,
+            notes: data.notes,
+          },
+        });
+
+        if (data.shares > 0) {
+          await withdraw(totalValue);
+        } else if (data.shares < 0) {
+          await deposit(totalValue);
+        }
+
+        await refreshBalance();
+        await loadCompanies({ q: query });
+
+        const action = data.shares > 0 ? "Bought" : "Sold";
+        const shareCount = Math.abs(data.shares);
+        const priceText = transaction.price ? `$${transaction.price.toFixed(2)}` : "unknown price";
+
+        showToast(`${action} ${shareCount} x ${tradeTarget.symbol} @ ${priceText}`, "success");
+      } catch (tradeError) {
+        showToast(parseErrorMessage(tradeError, "Transaction failed."), "error");
+      } finally {
+        setTradeTarget(null);
+      }
+    },
+    [
+      cashBalance,
+      deposit,
+      loadCompanies,
+      query,
+      refreshBalance,
+      showToast,
+      tradeTarget,
+      withdraw,
+    ],
+  );
+
+  const handleSortableHeaderKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLTableCellElement>, key: SortKey) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        toggleSort(key);
+      }
+    },
+    [toggleSort],
+  );
+
+  if (error) {
+    return (
+      <div style={styles.page}>
+        <p style={{ color: "red" }}>Error: {error}</p>
+        <button type="button" style={styles.button} onClick={() => void loadCompanies({ q: query })}>
+          Retry
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div style={styles.page}>
@@ -630,56 +721,45 @@ export default function Companies() {
         onNotification={showNotification}
         removedSymbol={removedSymbol}
       />
-      {/* Always show notification (if any), independent of charts */}
+
       {notification && (
         <Notification
           message={notification.message}
           type={notification.type}
-          onClose={hideNotification}
+          onClose={() => setNotification(null)}
         />
       )}
-      {/* Header + actions */}
+
       <div style={styles.headerRow}>
-        <h2 style={styles.title}>🏢 Companies</h2>
+        <h2 style={styles.title}>Companies</h2>
+
         <div style={styles.toolbar}>
           <input
             ref={searchRef}
             type="text"
-            placeholder="Search by symbol or name…"
+            placeholder="Search by symbol or name..."
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            style={{
-              ...styles.control,
-              ...styles.input,
-              //minWidth: 50,
-            }}
+            onChange={(event) => setQuery(event.target.value)}
+            style={{ ...styles.control, ...styles.input }}
             aria-label="Search companies"
           />
 
-          {/* EN: Status shows filtered+sorted count */}
           <span style={{ minWidth: 120, fontSize: 12, color: "#666" }} aria-live="polite">
             {loading
-              ? "Searching…"
+              ? "Searching..."
               : `${sortedItems.length} result${sortedItems.length === 1 ? "" : "s"}`}
           </span>
 
-          {/* Rows selector */}
-          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <label htmlFor="rows" style={{ fontSize: 12, color: "#666" }}>
-              Rows
-            </label>
+          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
+            Rows
             <select
-              id="rows"
               value={limit}
-              onChange={(e) => {
-                const next = Number(e.target.value);
-                setLimit(next);
-                void load({ q: query, limit: next }); // EN: fetch immediately with new limit
+              onChange={(event) => {
+                const nextLimit = Number(event.target.value);
+                setLimit(nextLimit);
+                void loadCompanies({ q: query, limit: nextLimit });
               }}
-              style={{
-                ...styles.control,
-                ...styles.select,
-              }}
+              style={{ ...styles.control, ...styles.select }}
               aria-label="Rows per request"
             >
               <option value={25}>25</option>
@@ -687,176 +767,90 @@ export default function Companies() {
               <option value={100}>100</option>
               <option value={200}>200</option>
             </select>
-          </div>
+          </label>
 
-          {/* EN: Sector filter dropdown */}
-          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <label htmlFor="sector" style={{ fontSize: 12, color: "#666" }}>
-              Sector
-            </label>
+          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
+            Sector
             <select
-              id="sector"
               value={sectorFilter}
-              onChange={(e) => setSectorFilter(e.target.value)}
-              style={{
-                ...styles.control,
-                ...styles.select,
-              }}
+              onChange={(event) => setSectorFilter(event.target.value)}
+              style={{ ...styles.control, ...styles.select }}
               aria-label="Filter by sector"
             >
-              {sectors.map((s) => (
-                <option key={s} value={s}>
-                  {s}
+              {sectors.map((sector) => (
+                <option key={sector} value={sector}>
+                  {sector}
                 </option>
               ))}
             </select>
-          </div>
+          </label>
         </div>
       </div>
 
-      {/* Table card with scroll and sticky header */}
       {items.length > 0 ? (
-        // ✅ Normal table
         <div style={{ ...styles.card, padding: 0, marginTop: 6 }}>
           <div style={styles.tableWrap}>
             <table style={styles.table}>
-              <thead style={styles.thead}>
+              <thead style={styles.tableHead}>
                 <tr>
-                  <th
-                    style={styles.th}
-                    role="button"
-                    tabIndex={0} // EN: focusable for keyboard
-                    onClick={() => toggleSort("symbol")}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") toggleSort("symbol");
-                    }}
-                    aria-sort={
-                      sortKey === "symbol"
-                        ? sortDir === "asc"
-                          ? "ascending"
-                          : sortDir === "desc"
-                            ? "descending"
-                            : "none"
-                        : "none"
-                    }
-                    title="Sort by symbol"
-                  >
-                    Symbol{" "}
-                    {sortKey === "symbol" &&
-                      (sortDir === "asc" ? "▲" : sortDir === "desc" ? "▼" : "")}
-                  </th>
-
-                  <th
-                    style={styles.th}
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => toggleSort("name")}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") toggleSort("name");
-                    }}
-                    aria-sort={
-                      sortKey === "name"
-                        ? sortDir === "asc"
-                          ? "ascending"
-                          : sortDir === "desc"
-                            ? "descending"
-                            : "none"
-                        : "none"
-                    }
-                    title="Sort by name"
-                  >
-                    Name{" "}
-                    {sortKey === "name" &&
-                      (sortDir === "asc" ? "▲" : sortDir === "desc" ? "▼" : "")}
-                  </th>
-
-                  <th
-                    style={styles.th}
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => toggleSort("sector")}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") toggleSort("sector");
-                    }}
-                    aria-sort={
-                      sortKey === "sector"
-                        ? sortDir === "asc"
-                          ? "ascending"
-                          : sortDir === "desc"
-                            ? "descending"
-                            : "none"
-                        : "none"
-                    }
-                    title="Sort by sector"
-                  >
-                    Sector{" "}
-                    {sortKey === "sector" &&
-                      (sortDir === "asc" ? "▲" : sortDir === "desc" ? "▼" : "")}
-                  </th>
-
-                  {/* EN: Actions column header (align right) */}
+                  {(["symbol", "name", "sector"] as const).map((key) => (
+                    <th
+                      key={key}
+                      style={styles.th}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => toggleSort(key)}
+                      onKeyDown={(event) => handleSortableHeaderKeyDown(event, key)}
+                      aria-sort={ariaSort(key)}
+                      title={`Sort by ${key}`}
+                    >
+                      {key[0].toUpperCase()}
+                      {key.slice(1)}
+                      {sortIndicator(key)}
+                    </th>
+                  ))}
                   <th style={{ ...styles.th, textAlign: "right" }}>Actions</th>
                 </tr>
               </thead>
+
               <tbody>
-                {sortedItems.map((c, idx) => {
-                  // Avoid duplicate symbol/name → show em dash if identical or empty
-                  const safeName = c.name && c.name !== c.symbol ? c.name : "—";
-                  const sym = String(c.symbol ?? "").toUpperCase(); // normalize once for stable comparisons
-                  const isBusy = !!refreshing[sym];
-
-                  // Show the refresh button only if profile data is incomplete.
-                  const needsRefresh = !(c.name && c.name.trim()) || !(c.sector && c.sector.trim());
-
-                  const isSelected = selectedSymbol?.toUpperCase() === sym; // selected row in the list
+                {sortedItems.map((company, index) => {
+                  const symbol = normalizeSymbol(company.symbol);
+                  const isSelected = selectedSymbol === symbol;
+                  const isBusy = Boolean(refreshing[symbol]);
+                  const needsRefresh = !company.name?.trim() || !company.sector?.trim();
+                  const rowKey = company.id ?? `${symbol}-${index}`;
 
                   return (
                     <tr
-                      key={c.id ?? `${c.symbol}-${idx}`}
-                      data-sym={sym}
+                      key={rowKey}
+                      data-symbol={symbol}
                       role="button"
                       tabIndex={0}
-                      onClick={() => sym && openAnalytics(sym)}
-                      onKeyDown={(e) => {
-                        if ((e.key === "Enter" || e.key === " ") && sym) openAnalytics(sym);
+                      onClick={() => openAnalytics(symbol)}
+                      onKeyDown={(event) => {
+                        if ((event.key === "Enter" || event.key === " ") && symbol) {
+                          event.preventDefault();
+                          openAnalytics(symbol);
+                        }
                       }}
                       aria-selected={isSelected || undefined}
                       style={{
-                        cursor: sym ? "pointer" : "default",
+                        cursor: symbol ? "pointer" : "default",
                         ...(isSelected
-                          ? { outline: "1px solid #555", background: "rgba(255,255,255,0.03)" }
+                          ? { outline: "1px solid #555", background: "rgba(0,0,0,0.03)" }
                           : {}),
                       }}
                     >
                       <td style={{ ...styles.td, ...styles.mono }}>
-                        {sym ? (
-                          <button
-                            type="button"
-                            onClick={() => openAnalytics(sym)}
-                            onKeyDown={(e) => {
-                              // keyboard accessible (Enter/Space)
-                              if (e.key === "Enter" || e.key === " ") openAnalytics(sym);
-                            }}
-                            title={`Open ${sym} analytics below`}
-                            // make button look like plain text
-                            style={{ all: "unset", cursor: "pointer", color: "inherit" }}
-                            aria-label={`Open ${sym} analytics`}
-                          >
-                            <strong>{sym}</strong>
-                          </button>
-                        ) : (
-                          "—"
-                        )}
+                        {symbol ? <strong>{symbol}</strong> : "-"}
                       </td>
-
-                      <td style={styles.td}>{safeName}</td>
-                      <td style={styles.td}>{c.sector ?? "—"}</td>
-
-                      {/* Actions: show buttons only when the row is currently selected */}
+                      <td style={styles.td}>{getCompanyName(company)}</td>
+                      <td style={styles.td}>{getSector(company)}</td>
                       <td
                         style={{
                           ...styles.tdRight,
-                          display: "flex", // lay out multiple actions nicely
+                          display: "flex",
                           gap: 6,
                           alignItems: "center",
                           justifyContent: "flex-end",
@@ -864,139 +858,50 @@ export default function Companies() {
                       >
                         {isSelected && (
                           <>
-                            {/* Trade Button (Buy/Sell) */}
                             <button
-                              onClick={(e) => {
-                                e.stopPropagation(); // prevent triggering parent row click
-                                setBuyDialogCompany({
-                                  symbol: sym,
-                                  name: c.name && c.name.trim() ? c.name : sym, // fallback if name missing
-                                  shares: c.shares ?? 0,
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setTradeTarget({
+                                  symbol,
+                                  name: getCompanyName(company) === "-" ? symbol : getCompanyName(company),
+                                  shares: company.shares ?? 0,
                                 });
                               }}
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter" || e.key === " ") {
-                                  e.stopPropagation();
-                                  setBuyDialogCompany({
-                                    symbol: sym,
-                                    name: c.name && c.name.trim() ? c.name : sym, // fallback if name missing
-                                    shares: c.shares ?? 0,
-                                  });
-                                }
-                              }}
-                              title={`Trade ${sym}`}
-                              aria-label={`Trade ${sym}`}
-                              style={{
-                                // neutral pill style
-                                padding: "2px 6px",
-                                borderRadius: 8,
-                                fontSize: 11,
-                                lineHeight: 1.2,
-                                cursor: "pointer",
-
-                                // neutral theme (blue-gray accent)
-                                border: "1px solid #3b82f6",
-                                background: "rgba(59, 130, 246, 0.12)",
-                                color: "#e0f2fe",
-
-                                // subtle animation
-                                boxShadow: "0 0 0 0 rgba(59,130,246,0)",
-                                transition: "box-shadow 120ms ease, transform 60ms ease",
-                              }}
-                              onMouseDown={(e) => {
-                                e.currentTarget.style.transform = "translateY(1px)";
-                                e.currentTarget.style.boxShadow = "0 0 0 2px rgba(59,130,246,0.25)";
-                              }}
-                              onMouseUp={(e) => {
-                                e.currentTarget.style.transform = "translateY(0)";
-                                e.currentTarget.style.boxShadow = "0 0 0 0 rgba(59,130,246,0)";
-                              }}
-                              onMouseLeave={(e) => {
-                                e.currentTarget.style.transform = "translateY(0)";
-                                e.currentTarget.style.boxShadow = "0 0 0 0 rgba(59,130,246,0)";
-                              }}
+                              title={`Trade ${symbol}`}
+                              aria-label={`Trade ${symbol}`}
+                              style={createActionButtonStyle("#2563eb")}
                             >
                               Trade
                             </button>
 
-                            {/* Details Button */}
                             <button
-                              onClick={(e) => {
-                                e.stopPropagation(); // keep current row selection
-                                navigate(`/company/${sym}`); // go to detail route /company/:symbol
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                navigate(`/company/${symbol}`);
                               }}
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter" || e.key === " ") {
-                                  e.stopPropagation();
-                                  navigate(`/company/${sym}`);
-                                }
-                              }}
-                              title={`Open details for ${sym}`}
-                              aria-label={`Open details for ${sym}`}
-                              style={{
-                                // compact, unobtrusive action pill
-                                padding: "2px 6px",
-                                borderRadius: 8,
-                                fontSize: 11,
-                                lineHeight: 1.2,
-                                cursor: "pointer",
-
-                                // green accent to indicate buy action
-                                border: "1px solid #22c55e",
-                                background: "rgba(34, 197, 94, 0.12)",
-                                color: "#dcfce7",
-
-                                // small visual polish
-                                boxShadow: "0 0 0 0 rgba(34,197,94,0)",
-                                transition: "box-shadow 120ms ease, transform 60ms ease",
-                              }}
-                              onMouseDown={(e) => {
-                                // quick press feedback without layout shift
-                                e.currentTarget.style.transform = "translateY(1px)";
-                                e.currentTarget.style.boxShadow = "0 0 0 2px rgba(34,197,94,0.25)";
-                              }}
-                              onMouseUp={(e) => {
-                                e.currentTarget.style.transform = "translateY(0)";
-                                e.currentTarget.style.boxShadow = "0 0 0 0 rgba(34,197,94,0)";
-                              }}
-                              onMouseLeave={(e) => {
-                                e.currentTarget.style.transform = "translateY(0)";
-                                e.currentTarget.style.boxShadow = "0 0 0 0 rgba(34,197,94,0)";
-                              }}
+                              title={`Open details for ${symbol}`}
+                              aria-label={`Open details for ${symbol}`}
+                              style={createActionButtonStyle("#16a34a")}
                             >
                               Details
                             </button>
-                            {/* Remove Button */}
+
                             <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setConfirmDelete({ isOpen: true, id: c.id ?? 0, symbol: sym }); // ✅ fallback if id is undefined
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                if (company.id != null) {
+                                  setDeleteTarget({ id: company.id, symbol });
+                                }
                               }}
-                              title={`Remove ${sym} from your portfolio`}
-                              aria-label={`Remove ${sym} from your portfolio`}
+                              disabled={company.id == null}
+                              title={`Remove ${symbol} from your portfolio`}
+                              aria-label={`Remove ${symbol} from your portfolio`}
                               style={{
-                                padding: "2px 6px",
-                                borderRadius: 8,
-                                fontSize: 11,
-                                lineHeight: 1.2,
-                                cursor: "pointer",
-                                border: "1px solid #ef4444",
-                                background: "rgba(239, 68, 68, 0.12)",
-                                color: "#fecaca",
-                                boxShadow: "0 0 0 0 rgba(239,68,68,0)",
-                                transition: "box-shadow 120ms ease, transform 60ms ease",
-                              }}
-                              onMouseDown={(e) => {
-                                e.currentTarget.style.transform = "translateY(1px)";
-                                e.currentTarget.style.boxShadow = "0 0 0 2px rgba(239,68,68,0.25)";
-                              }}
-                              onMouseUp={(e) => {
-                                e.currentTarget.style.transform = "translateY(0)";
-                                e.currentTarget.style.boxShadow = "0 0 0 0 rgba(239,68,68,0)";
-                              }}
-                              onMouseLeave={(e) => {
-                                e.currentTarget.style.transform = "translateY(0)";
-                                e.currentTarget.style.boxShadow = "0 0 0 0 rgba(239,68,68,0)";
+                                ...createActionButtonStyle("#dc2626"),
+                                ...(company.id == null ? styles.disabled : {}),
                               }}
                             >
                               Remove
@@ -1006,24 +911,22 @@ export default function Companies() {
 
                         {needsRefresh ? (
                           <button
-                            disabled={!sym || isBusy}
-                            onClick={(e) => {
-                              e.stopPropagation(); // prevent row click
-                              refreshProfile(sym);
+                            type="button"
+                            disabled={!symbol || isBusy}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void refreshProfile(symbol);
                             }}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter" || e.key === " ") e.stopPropagation();
-                            }}
-                            title="Fetch name & sector from FMP and store in the database"
+                            title="Fetch name and sector from the backend provider"
                             style={{
-                              ...styles.btn,
-                              ...(isBusy || !sym ? styles.btnDisabled : {}),
+                              ...styles.button,
+                              ...(isBusy || !symbol ? styles.disabled : {}),
                             }}
                           >
-                            {isBusy ? "Refreshing…" : "Refresh profile"}
+                            {isBusy ? "Refreshing..." : "Refresh profile"}
                           </button>
                         ) : (
-                          <span title="Profile up to date">✓</span>
+                          <span title="Profile up to date">OK</span>
                         )}
                       </td>
                     </tr>
@@ -1034,13 +937,12 @@ export default function Companies() {
           </div>
         </div>
       ) : (
-        // 🚫 Empty state Reload
         <div style={{ ...styles.card, marginTop: 6 }}>
           <p style={{ margin: 0, marginBottom: 8 }}>No companies found.</p>
           <button
             type="button"
-            style={{ ...styles.btn }}
-            onClick={() => void load({})}
+            style={styles.button}
+            onClick={() => void loadCompanies({ q: "" })}
             title="Reload full list"
           >
             Reload list
@@ -1048,18 +950,14 @@ export default function Companies() {
         </div>
       )}
 
-      {/* English: in-page analytics anchor (always present) */}
-      <div ref={analyticsRef} style={{ marginTop: 12 }} />
-
-      {/* English: render the panel only when a symbol is selected */}
       <div style={{ marginTop: 8 }}>
         <AnalyticsMiniPanel initialSymbol={selectedSymbol} onSymbolChange={setSelectedSymbol} />
       </div>
 
-      {/* Chart card: Companies per Sector (only if we have at least 2 sectors) */}
       {sectorData.length >= 2 && (
         <div style={{ ...styles.card, marginTop: 14 }}>
-          <h3 style={styles.subTitle}>📊 Companies per Sector</h3>
+          <h3 style={styles.subTitle}>Companies per Sector</h3>
+
           <div style={styles.chartCard}>
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
@@ -1067,16 +965,16 @@ export default function Companies() {
                   data={sectorData}
                   dataKey="count"
                   nameKey="sector"
-                  innerRadius={60} // EN: donut style for readability
+                  innerRadius={60}
                   outerRadius={100}
-                  paddingAngle={2} // EN: small gap between slices
+                  paddingAngle={2}
                   stroke="#ffffff"
                   strokeWidth={1}
-                  label={({ name }) => String(name)} // EN: show sector name on slices
+                  label={({ name }) => String(name)}
                   labelLine
                 >
-                  {sectorData.map((d, i) => (
-                    <Cell key={`cell-${d.sector}-${i}`} fill={colorByIndex(i)} />
+                  {sectorData.map((entry, index) => (
+                    <Cell key={`cell-${entry.sector}-${index}`} fill={colorByIndex(index)} />
                   ))}
                 </Pie>
                 <Tooltip />
@@ -1084,153 +982,54 @@ export default function Companies() {
             </ResponsiveContainer>
           </div>
 
-          {/* Simple legend */}
-          {sectorData.length > 0 && (
-            <div style={styles.legendWrap} aria-label="Sector legend">
-              {sectorData.map((d, i) => (
-                <div key={d.sector} style={styles.legendItem} title={d.sector}>
-                  <span
-                    style={{ ...styles.legendSwatch, background: colorByIndex(i) }}
-                    aria-hidden="true"
-                  />
-                  <span>{d.sector}</span>
-                </div>
-              ))}
-            </div>
-          )}
+          <div style={styles.legendWrap} aria-label="Sector legend">
+            {sectorData.map((entry, index) => (
+              <div key={entry.sector} style={styles.legendItem} title={entry.sector}>
+                <span
+                  style={{ ...styles.legendSwatch, background: colorByIndex(index) }}
+                  aria-hidden="true"
+                />
+                <span>{entry.sector}</span>
+              </div>
+            ))}
+          </div>
 
           <p style={styles.footnote}>
-            *Counts are derived from the current table data. Empty/missing sectors are grouped as{" "}
+            Counts are derived from the current table data. Empty or missing sectors are grouped as{" "}
             <em>Unknown</em>.
           </p>
         </div>
       )}
-      {/* Delete confirmation dialog */}
-      {confirmDelete && (
+
+      {deleteTarget && (
         <ConfirmDialog
-          isOpen={confirmDelete.isOpen}
+          isOpen
           title="Confirm Delete"
-          message={`Are you sure you want to remove ${confirmDelete.symbol} from the database? This action cannot be undone.`}
+          message={`Are you sure you want to remove ${deleteTarget.symbol} from your portfolio?`}
           confirmText="Delete"
           cancelText="Cancel"
           variant="danger"
-          onConfirm={() => {
-            removeCompany(confirmDelete.id, confirmDelete.symbol);
-          }}
-          onCancel={() => setConfirmDelete(null)}
+          onConfirm={() => void removeCompany(deleteTarget)}
+          onCancel={() => setDeleteTarget(null)}
         />
       )}
-      {/* Trade Dialog (Buy/Sell) */}
-      {buyDialogCompany && (
+
+      {tradeTarget && (
         <EditCompanyDialog
-          symbol={buyDialogCompany.symbol}
-          name={buyDialogCompany.name}
-          currentShares={buyDialogCompany.shares ?? 0}
-          onCancel={() => setBuyDialogCompany(null)}
-          onConfirm={async (data) => {
-            // Type definition for the backend response
-            interface TransactionDto {
-              createdAt: string;
-              shares: number;
-              price: number | null;
-              notes: string | null;
-            }
-
-            try {
-              // 🧮 Determine the final price (fallback to null if invalid)
-              const finalPrice =
-                data.purchasePrice && data.purchasePrice > 0 ? data.purchasePrice : null;
-
-              // 💰 Calculate the total transaction value (absolute)
-              const totalValue =
-                data.shares > 0
-                  ? data.shares * (finalPrice ?? 0)
-                  : Math.abs(data.shares) * (finalPrice ?? 0);
-
-              // 🧠 Safety guard: skip insufficient check if cashBalance not loaded
-              if (cashBalance == null) {
-                console.warn("⚠️ cashBalance is null at trade time — skipping insufficient check");
-              } else if (data.shares > 0) {
-                // 🧮 Recheck balance right before withdraw to avoid stale state
-                console.group("💰 TRADE DEBUG");
-                console.log("cashBalance (context):", cashBalance);
-                await refreshBalance();
-                console.log("cashBalance (after refresh):", cashBalance);
-                console.log("totalValue (to withdraw):", totalValue);
-                console.log("symbol:", buyDialogCompany.symbol);
-                console.groupEnd();
-
-                // 🔎 Fetch latest value from context
-                const latestBalance = cashBalance ?? 0;
-
-                // ⚠️ Apply small epsilon for rounding safety
-                if (totalValue > latestBalance + 0.0001) {
-                  setToastType("error");
-                  setToastMsg("Insufficient funds (updated check).");
-                  return;
-                }
-              }
-
-              // 🧾 Step 1: Create transaction via backend API
-              const result = await fetchJson<
-                TransactionDto,
-                { symbol: string; shares: number; price: number | null; notes: string }
-              >({
-                path: "/api/UserCompanyTransactions",
-                method: "POST",
-                body: {
-                  symbol: buyDialogCompany.symbol,
-                  shares: data.shares,
-                  price: finalPrice,
-                  notes: data.notes,
-                },
-              });
-
-             // 🪙 Step 2: Update balance via frontend (since backend does NOT handle cash update)
-            if (data.shares > 0) {
-              // 💸 Withdraw on buy
-              await withdraw(totalValue);
-            } else if (data.shares < 0) {
-              // 💰 Deposit on sell
-              
-              await deposit(totalValue);
-            }
-            
-              // 🕒 Give backend a short moment to commit transaction before refreshing balance
-              await new Promise((r) => setTimeout(r, 200));
-
-
-              // 🔄 Step 3: Refresh balance to sync global state
-              await refreshBalance();
-
-              // ✅ Step 4: Display success feedback
-              const action = data.shares > 0 ? "Bought" : "Sold";
-              const shareCount = Math.abs(data.shares);
-              const priceText = result.price ? `$${result.price.toFixed(2)}` : "unknown price";
-              const message = `${action} ${shareCount} × ${buyDialogCompany.symbol} @ ${priceText}`;
-
-              setToastType("success");
-              setToastMsg(message);
-            } catch (error: unknown) {
-              console.error("🔥 Trade Error:", error);
-
-              // 🧩 Robust error mapping
-              let message = "Transaction failed.";
-              if (typeof error === "string") message = error;
-              else if (error instanceof Error) message = error.message;
-
-              setToastType("error");
-              setToastMsg(message);
-            } finally {
-              // 🧼 Always close the dialog
-              setBuyDialogCompany(null);
-            }
-          }}
+          symbol={tradeTarget.symbol}
+          name={tradeTarget.name}
+          currentShares={tradeTarget.shares}
+          onCancel={() => setTradeTarget(null)}
+          onConfirm={(data) => void handleTrade(data)}
         />
       )}
 
-      {toastMsg && (
-        <InlineToast message={toastMsg} type={toastType} onClose={() => setToastMsg(null)} />
+      {toastMessage && (
+        <InlineToast
+          message={toastMessage}
+          type={toastType}
+          onClose={() => setToastMessage(null)}
+        />
       )}
     </div>
   );

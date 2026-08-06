@@ -1,13 +1,20 @@
-import ValuationSection from "./analytics/ValuationSection";
-import ProfitabilitySection from "./analytics/ProfitabilitySection";
-import SolvencySection from "./analytics/SolvencySection";
+import CashFlowSection from "./analytics/CashFlowSection";
 import EfficiencySection from "./analytics/EfficiencySection";
 import PerShareSection from "./analytics/PerShareSection";
-import CashFlowSection from "./analytics/CashFlowSection";
+import ProfitabilitySection from "./analytics/ProfitabilitySection";
+import SolvencySection from "./analytics/SolvencySection";
+import ValuationSection from "./analytics/ValuationSection";
 
-export default function CompanyAnalyticsPanel({ symbol }: { symbol?: string }) {
-  const sym = (symbol ?? "").trim().toUpperCase();
-  if (!sym) return null;
+interface CompanyAnalyticsPanelProps {
+  symbol?: string;
+}
+
+export default function CompanyAnalyticsPanel({ symbol }: CompanyAnalyticsPanelProps) {
+  const normalizedSymbol = symbol?.trim().toUpperCase() ?? "";
+
+  if (!normalizedSymbol) {
+    return null;
+  }
 
   return (
     <section
@@ -24,13 +31,12 @@ export default function CompanyAnalyticsPanel({ symbol }: { symbol?: string }) {
     >
       <div style={{ fontWeight: 600, opacity: 0.95 }}>Analytics</div>
 
-      {/* English: sections are data-aware; UI-only blocks removed */}
-      <ValuationSection symbol={sym} showPrice={false} showPE={false} />
-      <ProfitabilitySection symbol={sym} />
-      <SolvencySection symbol={sym} />
-      <EfficiencySection symbol={sym} />
-      <PerShareSection symbol={sym} />
-      <CashFlowSection symbol={sym} />
+      <ValuationSection symbol={normalizedSymbol} showPrice={false} showPE={false} />
+      <ProfitabilitySection symbol={normalizedSymbol} />
+      <SolvencySection symbol={normalizedSymbol} />
+      <EfficiencySection symbol={normalizedSymbol} />
+      <PerShareSection symbol={normalizedSymbol} />
+      <CashFlowSection symbol={normalizedSymbol} />
     </section>
   );
 }

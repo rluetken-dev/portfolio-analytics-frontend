@@ -18,23 +18,26 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Use Node 20
+      - name: Use Node 24
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24"
           cache: "npm"
 
       - name: Install dependencies
         run: npm ci
 
       - name: Lint
-        run: npm run lint:check
+        run: npm run lint
 
       - name: Build
         env:
-          # Provide a safe default so Vite build works without secrets
-          VITE_API_BASE_URL: "http://localhost:5046"
+          VITE_API_BASE: "/api"
+          VITE_BACKEND_PROXY_TARGET: "http://localhost:5046"
         run: npm run build
+
+      - name: Run status message tests
+        run: npm run test:status
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4

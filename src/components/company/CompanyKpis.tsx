@@ -1,110 +1,150 @@
-// src/components/company/CompanyKpis.tsx
-import * as React from "react";
-import { getLatestCloseFromQuotes } from "../../services/api/quotes";
-import { useFormatDisplayValue } from "../../utils/formatDisplayValue";
+import { useContext, useEffect, useMemo, useState } from "react";
+import type { CSSProperties } from "react";
+
 import { CurrencyContext } from "../../context/CurrencyContextObject";
 import { useCurrencyFade } from "../../hooks/useCurrencyFade";
+import { getLatestCloseFromQuotes } from "../../services/api/quotes";
+import { useFormatDisplayValue } from "../../utils/formatDisplayValue";
 
-// 🧩 Type for KPI items
-type Metric = { label: string; value: string; hint?: string };
+type Metric = {
+  label: string;
+  value: string;
+  hint?: string;
+};
 
-// 🧩 Helper to fetch numeric values
-async function fetchMetricNumber(
-  baseUrl: string,
-  path: string,
-  symbol: string,
-  keys: string[],
-): Promise<{ value: number | null; status: number }> {
-  const resp = await fetch(`${baseUrl}${path}?symbol=${encodeURIComponent(symbol)}`, {
-    headers: { Accept: "application/json" },
-  });
-  if (!resp.ok) return { value: null, status: resp.status };
-  const json = (await resp.json()) as unknown;
-  if (typeof json === "number") return { value: json, status: resp.status };
-  if (json && typeof json === "object") {
-    const o = json as Record<string, unknown>;
-    for (const k of keys)
-      if (typeof o[k] === "number") return { value: o[k] as number, status: resp.status };
-  }
-  return { value: null, status: resp.status };
+interface CompanyKpisProps {
+  symbol: string;
 }
 
-// 🧩 Formatters (non-currency values)
-const asRatio = (v: number | null) => (v == null || Number.isNaN(v) ? "n/a" : `${v.toFixed(2)}x`);
-const asPct = (v: number | null) =>
-  v == null || Number.isNaN(v) ? "n/a" : `${(v * 100).toFixed(1)}%`;
+interface MetricResult {
+  value: number | null;
+  status: number;
+}
 
-// 🧩 Simple card UI
-const card: React.CSSProperties = {
-  border: "1px solid #333",
+const cardStyle: CSSProperties = {
+  border: "1px solid #d1d5db",
   borderRadius: 10,
   padding: 10,
   minHeight: 64,
+  backgroundColor: "#fff",
 };
-const grid: React.CSSProperties = {
+
+const gridStyle: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
   gap: 10,
 };
 
-export default function CompanyKpis({ symbol }: { symbol: string }) {
-  const sym = (symbol ?? "").trim().toUpperCase();
-  const backendBase = React.useMemo(() => "", []);
-  const { fadeClass } = useCurrencyFade();
+const skeletonStyle: CSSProperties = {
+  marginTop: 8,
+  height: 18,
+  borderRadius: 6,
+  background: "#e5e7eb",
+};
 
-  // 🧩 Currency context and formatter
-  const { currency } = React.useContext(CurrencyContext)!;
+async function fetchMetricNumber(
+  path: string,
+  symbol: string,
+  keys: string[],
+): Promise<MetricResult> {
+  const response = await fetch(`${path}?symbol=${encodeURIComponent(symbol)}`, {
+    headers: { Accept: "application/json" },
+  });
+
+  if (!response.ok) {
+    return { value: null, status: response.status };
+  }
+
+  const data = (await response.json()) as unknown;
+
+  if (typeof data === "number") {
+    return { value: data, status: response.status };
+  }
+
+  if (data && typeof data === "object") {
+    const record = data as Record<string, unknown>;
+
+    for (const key of keys) {
+      if (typeof record[key] === "number") {
+        return { value: record[key], status: response.status };
+      }
+    }
+  }
+
+  return { value: null, status: response.status };
+}
+
+function formatRatio(value: number | null) {
+  return value === null || Number.isNaN(value) ? "n/a" : `${value.toFixed(2)}x`;
+}
+
+function formatPercent(value: number | null) {
+  return value === null || Number.isNaN(value) ? "n/a" : `${(value * 100).toFixed(1)}%`;
+}
+
+export default function CompanyKpis({ symbol }: CompanyKpisProps) {
+  const normalizedSymbol = useMemo(() => symbol.trim().toUpperCase(), [symbol]);
+  const { fadeClass } = useCurrencyFade();
+  const currencyContext = useContext(CurrencyContext);
   const { formatDisplayValue } = useFormatDisplayValue();
 
-  // 🧩 Component state
-  const [loading, setLoading] = React.useState(true);
-  const [err, setErr] = React.useState<string | null>(null);
-  const [metrics, setMetrics] = React.useState<Metric[]>([]);
-  const [basePrice, setBasePrice] = React.useState<number | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [metrics, setMetrics] = useState<Metric[]>([]);
+  const [basePrice, setBasePrice] = useState<number | null>(null);
 
-  React.useEffect(() => {
-    let aborted = false;
+  if (!currencyContext) {
+    throw new Error("CompanyKpis must be used within a CurrencyProvider.");
+  }
 
-    async function run() {
-      if (!sym) {
+  const { currency } = currencyContext;
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadMetrics = async () => {
+      if (!normalizedSymbol) {
         setMetrics([]);
-        setLoading(false);
+        setIsLoading(false);
         return;
       }
+
+      setIsLoading(true);
+      setErrorMessage(null);
+
       try {
-        setLoading(true);
-        setErr(null);
+        const price = await getLatestCloseFromQuotes(normalizedSymbol);
 
-        // Fetch price first (provides currency unit and as-of hint)
-        const price = await getLatestCloseFromQuotes(sym);
+        const [peResult, roeResult, netMarginResult, fcfYieldResult, debtToEquityResult] =
+          await Promise.all([
+            fetchMetricNumber("/api/analytics/pe", normalizedSymbol, ["value", "pe"]),
+            fetchMetricNumber("/api/analytics/roe", normalizedSymbol, ["value", "roe"]),
+            fetchMetricNumber("/api/analytics/net-margin", normalizedSymbol, [
+              "value",
+              "netMargin",
+            ]),
+            fetchMetricNumber("/api/analytics/fcf-yield", normalizedSymbol, [
+              "value",
+              "fcfYield",
+            ]),
+            fetchMetricNumber("/api/analytics/debt-to-equity", normalizedSymbol, [
+              "value",
+              "debtToEquity",
+            ]),
+          ]);
 
-        // Fetch analytics in parallel
-        const [peRes, roeRes, nmRes, fcfyRes, dteRes] = await Promise.all([
-          fetchMetricNumber(backendBase, "/api/analytics/pe", sym, ["value", "pe"]),
-          fetchMetricNumber(backendBase, "/api/analytics/roe", sym, ["value", "roe"]),
-          fetchMetricNumber(backendBase, "/api/analytics/net-margin", sym, ["value", "netMargin"]),
-          fetchMetricNumber(backendBase, "/api/analytics/fcf-yield", sym, ["value", "fcfYield"]),
-          fetchMetricNumber(backendBase, "/api/analytics/debt-to-equity", sym, [
-            "value",
-            "debtToEquity",
-          ]),
-        ]);
+        if (!isMounted) {
+          return;
+        }
 
-        if (aborted) return;
-
-        // 🧩 Store base price for reformatting
-        if (price.value != null && Number.isFinite(price.value)) {
+        if (price.value !== null && Number.isFinite(price.value)) {
           setBasePrice(price.value);
         }
 
-        // 🧩 Use formatDisplayValue for currency-aware display
-        const formattedPrice =
-          price.value != null ? formatDisplayValue("Price", price.value) : "n/a";
-
-        const kpis: Metric[] = [
+        setMetrics([
           {
             label: "Price",
-            value: formattedPrice,
+            value: price.value !== null ? formatDisplayValue("Price", price.value) : "n/a",
             hint:
               price.status === 200
                 ? price.asOf
@@ -112,77 +152,82 @@ export default function CompanyKpis({ symbol }: { symbol: string }) {
                   : undefined
                 : `HTTP ${price.status}`,
           },
-          { label: "P/E", value: asRatio(peRes.value) },
-          { label: "ROE", value: asPct(roeRes.value) },
-          { label: "Net Margin", value: asPct(nmRes.value) },
-          { label: "FCF Yield", value: asPct(fcfyRes.value) },
-          { label: "Debt/Equity", value: asRatio(dteRes.value) },
-        ];
+          { label: "P/E", value: formatRatio(peResult.value) },
+          { label: "ROE", value: formatPercent(roeResult.value) },
+          { label: "Net Margin", value: formatPercent(netMarginResult.value) },
+          { label: "FCF Yield", value: formatPercent(fcfYieldResult.value) },
+          { label: "Debt/Equity", value: formatRatio(debtToEquityResult.value) },
+        ]);
+      } catch {
+        if (!isMounted) {
+          return;
+        }
 
-        setMetrics(kpis);
-      } catch (e) {
-        setErr(e instanceof Error ? e.message : String(e));
+        setErrorMessage("Key metrics could not be loaded.");
         setMetrics([]);
       } finally {
-        if (!aborted) setLoading(false);
+        if (isMounted) {
+          setIsLoading(false);
+        }
       }
+    };
+
+    void loadMetrics();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [normalizedSymbol, formatDisplayValue]);
+
+  useEffect(() => {
+    if (basePrice === null) {
+      return;
     }
 
-    run();
-    return () => {
-      aborted = true;
-    };
-  }, [sym, backendBase, formatDisplayValue]);
-
-  /* -------------------------------------------------------
-   💱 Reformat price after fade-out (for smooth transition)
-  ------------------------------------------------------- */
-  React.useEffect(() => {
-    if (basePrice == null) return;
-
-    // Wait until fade-out completes before reformatting
-    const timeout = setTimeout(() => {
-      setMetrics((prev) =>
-        prev.map((m) =>
-          m.label === "Price" ? { ...m, value: formatDisplayValue("Price", basePrice) } : m,
+    const timeoutId = window.setTimeout(() => {
+      setMetrics((currentMetrics) =>
+        currentMetrics.map((metric) =>
+          metric.label === "Price"
+            ? { ...metric, value: formatDisplayValue("Price", basePrice) }
+            : metric,
         ),
       );
-    }, 150); // half the fade duration
+    }, 150);
 
-    return () => clearTimeout(timeout);
+    return () => window.clearTimeout(timeoutId);
   }, [currency, basePrice, formatDisplayValue]);
 
-  if (!sym) return null;
+  if (!normalizedSymbol) {
+    return null;
+  }
 
   return (
     <section style={{ marginTop: 12 }}>
       <h2 style={{ margin: "0 0 8px 0", fontSize: 16, opacity: 0.9 }}>Key Metrics</h2>
-      {err && <div style={{ marginBottom: 8, fontSize: 12, color: "#f87171" }}>{err}</div>}
-      <div style={grid}>
-        {Array.from({ length: loading ? 6 : metrics.length }).map((_, i) => {
-          const m: Metric | null = loading ? null : (metrics[i] ?? null);
+
+      {errorMessage && (
+        <div role="status" style={{ marginBottom: 8, fontSize: 12, color: "#b91c1c" }}>
+          {errorMessage}
+        </div>
+      )}
+
+      <div style={gridStyle}>
+        {Array.from({ length: isLoading ? 6 : metrics.length }).map((_, index) => {
+          const metric = isLoading ? null : (metrics[index] ?? null);
 
           return (
-            <div key={i} style={card} aria-busy={loading}>
-              {loading ? (
+            <div key={metric?.label ?? index} style={cardStyle} aria-busy={isLoading}>
+              {isLoading ? (
                 <>
-                  <div style={{ fontSize: 11, opacity: 0.6 }}>Loading…</div>
-                  <div
-                    style={{
-                      marginTop: 8,
-                      height: 18,
-                      borderRadius: 6,
-                      background: "rgba(255,255,255,0.12)",
-                    }}
-                  />
+                  <div style={{ fontSize: 11, opacity: 0.6 }}>Loading...</div>
+                  <div style={skeletonStyle} />
                 </>
               ) : (
                 <>
-                  {/* English: safe access because m is non-null when not loading */}
-                  <div style={{ fontSize: 11, opacity: 0.7 }}>{m?.label}</div>
+                  <div style={{ fontSize: 11, opacity: 0.7 }}>{metric?.label}</div>
                   <div
-                    title={m?.hint}
-                    className={m?.label === "Price" ? fadeClass : ""}
+                    title={metric?.hint}
+                    className={metric?.label === "Price" ? fadeClass : ""}
                     style={{
                       fontSize: 18,
                       fontWeight: 600,
@@ -192,9 +237,9 @@ export default function CompanyKpis({ symbol }: { symbol: string }) {
                       textOverflow: "ellipsis",
                     }}
                   >
-                    {m?.value}
+                    {metric?.value}
                   </div>
-                  {m?.hint && (
+                  {metric?.hint && (
                     <div
                       style={{
                         fontSize: 10,
@@ -205,7 +250,7 @@ export default function CompanyKpis({ symbol }: { symbol: string }) {
                         textOverflow: "ellipsis",
                       }}
                     >
-                      {m.hint}
+                      {metric.hint}
                     </div>
                   )}
                 </>

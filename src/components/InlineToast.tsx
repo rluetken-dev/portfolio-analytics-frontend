@@ -1,31 +1,36 @@
-import React, { useEffect } from "react";
+import { useEffect } from "react";
+
+export type InlineToastType = "success" | "error" | "info";
 
 export interface InlineToastProps {
   message: string;
-  type?: "success" | "error" | "info";
+  type?: InlineToastType;
   durationMs?: number;
   onClose?: () => void;
 }
 
-/**
- * InlineToast – a clean, minimal toast message styled for the Portfolio UI.
- * Appears bottom-right and auto-hides after a short duration.
- */
-const InlineToast: React.FC<InlineToastProps> = ({
+const colorByType = {
+  success: "#10b981",
+  error: "#ef4444",
+  info: "#2563eb",
+} satisfies Record<InlineToastType, string>;
+
+export default function InlineToast({
   message,
   type = "success",
   durationMs = 2500,
   onClose,
-}) => {
-  const color = type === "success" ? "#10b981" : "#ef4444";
+}: InlineToastProps) {
+  const color = colorByType[type];
 
   useEffect(() => {
-    const t = setTimeout(() => onClose?.(), durationMs);
-    return () => clearTimeout(t);
+    const timeoutId = window.setTimeout(() => onClose?.(), durationMs);
+    return () => window.clearTimeout(timeoutId);
   }, [onClose, durationMs]);
 
   return (
     <div
+      role={type === "error" ? "alert" : "status"}
       style={{
         position: "fixed",
         bottom: 20,
@@ -44,6 +49,4 @@ const InlineToast: React.FC<InlineToastProps> = ({
       {message}
     </div>
   );
-};
-
-export default InlineToast;
+}

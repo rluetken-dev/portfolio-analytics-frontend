@@ -1,27 +1,36 @@
-import { useEffect, useState, useCallback } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { ReactNode } from "react";
+
 import Notification from "../components/Notification";
 import { NotificationContext } from "./NotificationContext";
+import type { NotificationType } from "./NotificationContext";
 
-type NotificationType = "success" | "error" | "info";
+interface NotificationProviderProps {
+  children: ReactNode;
+}
 
-export function NotificationProvider({ children }: { children: ReactNode }) {
-  const [notification, setNotification] = useState<{
-    message: string;
-    type: NotificationType;
-  } | null>(null);
+type NotificationState = {
+  message: string;
+  type: NotificationType;
+};
+
+export function NotificationProvider({ children }: NotificationProviderProps) {
+  const [notification, setNotification] = useState<NotificationState | null>(null);
 
   const showNotification = useCallback((message: string, type: NotificationType) => {
     setNotification({ message, type });
   }, []);
 
-  // 🔴 Listen for global rate-limit events
   useEffect(() => {
-    const handler = () => {
-      setNotification({ message: "API rate limit reached. Please wait a moment.", type: "error" });
+    const handleRateLimit = () => {
+      setNotification({
+        message: "API rate limit reached. Please wait a moment.",
+        type: "error",
+      });
     };
-    window.addEventListener("api:rate-limit", handler);
-    return () => window.removeEventListener("api:rate-limit", handler);
+
+    window.addEventListener("api:rate-limit", handleRateLimit);
+    return () => window.removeEventListener("api:rate-limit", handleRateLimit);
   }, []);
 
   return (

@@ -1,43 +1,32 @@
-// src/services/api/userBalance.ts
-import { getAccessToken } from "../../utils/token";
+import { fetchJson } from "./client";
 
 export interface BalanceResponse {
   username: string;
   newBalance: number;
 }
 
+function validateAmount(amount: number) {
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new Error("Amount must be a positive number.");
+  }
+}
+
 export async function deposit(amount: number): Promise<BalanceResponse> {
-  const token = getAccessToken();
-  if (!token) throw new Error("No access token available");
+  validateAmount(amount);
 
-  const res = await fetch("/api/User/deposit", {
+  return fetchJson<BalanceResponse, number>({
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-    },
-    credentials: "include",
-    body: JSON.stringify(amount),
+    path: "/api/User/deposit",
+    body: amount,
   });
-
-  if (!res.ok) throw new Error(`Deposit failed: ${res.status}`);
-  return res.json();
 }
 
 export async function withdraw(amount: number): Promise<BalanceResponse> {
-  const token = getAccessToken();
-  if (!token) throw new Error("No access token available");
+  validateAmount(amount);
 
-  const res = await fetch("/api/User/withdraw", {
+  return fetchJson<BalanceResponse, number>({
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-    },
-    credentials: "include",
-    body: JSON.stringify(amount),
+    path: "/api/User/withdraw",
+    body: amount,
   });
-
-  if (!res.ok) throw new Error(`Withdraw failed: ${res.status}`);
-  return res.json();
 }

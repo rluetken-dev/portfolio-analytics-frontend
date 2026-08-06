@@ -1,34 +1,36 @@
-import { useEffect, useState, useContext } from "react";
+import { useContext, useEffect, useState } from "react";
+
 import { CurrencyContext } from "../context/CurrencyContextObject";
 
-/**
- * Hook: handles a two-phase fade animation on currency change
- * Returns both the CSS class and an 'isAnimating' flag.
- */
-export function useCurrencyFade(duration: number = 300) {
-  const { currency } = useContext(CurrencyContext)!;
+export function useCurrencyFade(durationMs = 300) {
+  const currencyContext = useContext(CurrencyContext);
+
+  if (!currencyContext) {
+    throw new Error("useCurrencyFade must be used within a CurrencyProvider.");
+  }
+
+  const { currency } = currencyContext;
   const [isAnimating, setIsAnimating] = useState(false);
   const [fadeClass, setFadeClass] = useState("");
 
   useEffect(() => {
-    // Phase 1: start fade-out
     setFadeClass("fade-currency-out");
     setIsAnimating(true);
 
-    // Phase 2: fade-in after half the duration
-    const mid = setTimeout(() => setFadeClass("fade-currency-in"), duration / 2);
+    const fadeInTimeoutId = window.setTimeout(() => {
+      setFadeClass("fade-currency-in");
+    }, durationMs / 2);
 
-    // Phase 3: reset after full duration
-    const end = setTimeout(() => {
+    const resetTimeoutId = window.setTimeout(() => {
       setFadeClass("");
       setIsAnimating(false);
-    }, duration);
+    }, durationMs);
 
     return () => {
-      clearTimeout(mid);
-      clearTimeout(end);
+      window.clearTimeout(fadeInTimeoutId);
+      window.clearTimeout(resetTimeoutId);
     };
-  }, [currency, duration]);
+  }, [currency, durationMs]);
 
   return { fadeClass, isAnimating };
 }

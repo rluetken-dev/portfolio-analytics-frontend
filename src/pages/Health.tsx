@@ -1,60 +1,58 @@
-// src/pages/Health.tsx
 import { useEffect, useState } from "react";
+
 import { fetchJson } from "../services/api/client";
 
+type HealthResponse = {
+  status?: string;
+};
+
 export default function Health() {
-  // UI state for the health status and potential errors
-  const [status, setStatus] = useState<string>("loading...");
+  const [status, setStatus] = useState("loading...");
   const [error, setError] = useState<string | null>(null);
-  const [usedMock, setUsedMock] = useState<boolean>(false);
+  const [usesFallback, setUsesFallback] = useState(false);
 
   useEffect(() => {
-    let isMounted = true; // guard to avoid setting state after unmount
+    let isMounted = true;
 
-    // IIFE to use async/await inside useEffect
-    (async () => {
+    const loadHealthStatus = async () => {
       try {
-        // Call real backend: expected JSON like { "status": "ok" }
-        const res = await fetchJson<{ status: string }>({ path: "/health" });
-        if (!isMounted) return;
-        setStatus(res?.status ?? "unknown");
-      } catch (err) {
-        // If the real call fails (offline, CORS, wrong port, etc.),
-        // we present a friendly message and fall back to a mock value.
-        if (!isMounted) return;
-        const msg = err instanceof Error ? err.message : String(err);
-        setError(msg);
+        const response = await fetchJson<HealthResponse>({ path: "/health" });
 
-        // --- Mock fallback (keeps the page useful during dev) ---
-        // Note: This is deliberately simple; we can later gate by env var if desired.
-        setUsedMock(true);
-        setStatus("ok (mock)");
+        if (!isMounted) {
+          return;
+        }
+
+        setStatus(response.status ?? "unknown");
+        setError(null);
+        setUsesFallback(false);
+      } catch (error) {
+        if (!isMounted) {
+          return;
+        }
+
+        setStatus("unavailable");
+        setError(error instanceof Error ? error.message : "Health check failed.");
+        setUsesFallback(true);
       }
-    })();
+    };
+
+    void loadHealthStatus();
 
     return () => {
-      // cleanup flag so we don't update state after unmount
       isMounted = false;
     };
   }, []);
 
   return (
-    <div>
-      <h2>🩺 Health Check</h2>
+    <main>
+      <h1>Health Check</h1>
 
-      {/* Primary status display (real or mock) */}
       <p>
         Status: <strong>{status}</strong>
-        {usedMock && (
-          <span style={{ marginLeft: 8, color: "gray" }}>
-            {/* Tell developers that this is a mock, not the real backend */}— using mock (backend
-            unreachable)
-          </span>
-        )}
+        {usesFallback && <span style={{ marginLeft: 8, color: "gray" }}>backend unreachable</span>}
       </p>
 
-      {/* Optional: show error details for developers */}
       {error && <p style={{ color: "red", marginTop: "0.5rem" }}>Error: {error}</p>}
-    </div>
+    </main>
   );
 }

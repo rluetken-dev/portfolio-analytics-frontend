@@ -1,19 +1,24 @@
 import { useAuth } from "../hooks/useAuth";
 
+const badgeBaseStyle = {
+  display: "inline-block",
+  padding: "4px 10px",
+  borderRadius: 999,
+  fontSize: "0.875rem",
+  fontWeight: 500,
+};
+
 export function AuthBadge() {
   const { user, isAuthenticated, logout } = useAuth();
 
   if (!isAuthenticated) {
     return (
       <span
+        aria-label="Authentication status: not logged in"
         style={{
-          display: "inline-block",
-          padding: "4px 10px",
-          borderRadius: "999px",
-          backgroundColor: "#fee2e2", // light red
-          color: "#b91c1c", // dark red text
-          fontSize: "0.875rem",
-          fontWeight: 500,
+          ...badgeBaseStyle,
+          backgroundColor: "#fee2e2",
+          color: "#b91c1c",
         }}
       >
         Not logged in
@@ -24,37 +29,26 @@ export function AuthBadge() {
   return (
     <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
       <span
+        aria-label={`Logged in as ${user?.username ?? "unknown user"}`}
         style={{
-          display: "inline-block",
-          padding: "4px 10px",
-          borderRadius: "999px",
-          backgroundColor: "#dcfce7", // light green
-          color: "#166534", // dark green text
-          fontSize: "0.875rem",
-          fontWeight: 500,
+          ...badgeBaseStyle,
+          backgroundColor: "#dcfce7",
+          color: "#166534",
         }}
       >
-        {user?.username}
+        {user?.username ?? "User"}
       </span>
+
       <button
+        type="button"
         onClick={logout}
         style={{
           padding: "4px 8px",
-          borderRadius: "6px",
+          borderRadius: 6,
           border: "1px solid #ccc",
           backgroundColor: "white",
+          color: "#111827",
           cursor: "pointer",
-          transition: "all 0.2s ease",
-        }}
-        onMouseOver={(e) => {
-          (e.currentTarget as HTMLButtonElement).style.backgroundColor = "#ef4444"; // red
-          (e.currentTarget as HTMLButtonElement).style.color = "white";
-          (e.currentTarget as HTMLButtonElement).style.borderColor = "#ef4444";
-        }}
-        onMouseOut={(e) => {
-          (e.currentTarget as HTMLButtonElement).style.backgroundColor = "white";
-          (e.currentTarget as HTMLButtonElement).style.color = "black";
-          (e.currentTarget as HTMLButtonElement).style.borderColor = "#ccc";
         }}
       >
         Logout

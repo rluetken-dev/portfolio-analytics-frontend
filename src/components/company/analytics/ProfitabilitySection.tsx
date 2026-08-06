@@ -1,174 +1,204 @@
-// src/components/company/analytics/ProfitabilitySection.tsx
-import * as React from "react";
-import { SectionHeader, SectionGrid, MetricCard } from "./ui";
+import { useEffect, useMemo, useState } from "react";
 
-/** -------- Small helpers (local to the section) -------- */
-// English: tolerant numeric metric fetcher from /api/analytics/*
-async function fetchMetricNumber(
-  baseUrl: string,
-  path: string,
-  symbol: string,
-  candidateKeys: string[],
-): Promise<{ value: number | null; status: number }> {
-  const resp = await fetch(`${baseUrl}${path}?symbol=${encodeURIComponent(symbol)}`, {
-    headers: { Accept: "application/json" },
-  });
-  if (!resp.ok) return { value: null, status: resp.status };
+import { MetricCard, SectionGrid, SectionHeader } from "./ui";
 
-  const raw = await resp.json();
-  if (typeof raw === "number") return { value: raw, status: resp.status };
+type MetricResult = {
+  value: number | null;
+  status: number;
+};
 
-  if (raw && typeof raw === "object") {
-    const o = raw as Record<string, unknown>;
-    for (const k of candidateKeys) {
-      if (typeof o[k] === "number") return { value: o[k] as number, status: resp.status };
-    }
-  }
-  return { value: null, status: resp.status };
-}
-
-// English: percent formatter like '12.3%'
-function fmtPercent(v: number | null | undefined, digits = 1): string {
-  if (v == null || !Number.isFinite(v)) return "—";
-  return `${(v * 100).toFixed(digits)}%`;
-}
-
-/** -------- Component -------- */
-export default function ProfitabilitySection({
-  symbol,
-  showROE = false, // English: avoid duplicates with Key Metrics by default
-  showNetMargin = false, // English: avoid duplicates with Key Metrics by default
-  showFcfYield = false, // English: avoid duplicates with Key Metrics by default
-}: {
+interface ProfitabilitySectionProps {
   symbol: string;
   showROE?: boolean;
   showNetMargin?: boolean;
   showFcfYield?: boolean;
-}) {
-  const sym = (symbol ?? "").trim().toUpperCase();
+}
 
-  // English: keep base stable (do not depend on sym)
-  const backendBase = React.useMemo(() => "", []);
+const emptyValue = "—";
 
-  // English: display-ready strings for each metric
-  const [roeStr, setRoeStr] = React.useState("—");
-  const [roaStr, setRoaStr] = React.useState("—");
-  const [netMarginStr, setNetMarginStr] = React.useState("—");
-  const [fcfYieldStr, setFcfYieldStr] = React.useState("—");
-  const [fcfMarginStr, setFcfMarginStr] = React.useState("—");
-  const [oeYieldStr, setOeYieldStr] = React.useState("—");
+async function fetchMetricNumber(
+  path: string,
+  symbol: string,
+  candidateKeys: string[],
+): Promise<MetricResult> {
+  const response = await fetch(`${path}?symbol=${encodeURIComponent(symbol)}`, {
+    headers: { Accept: "application/json" },
+  });
 
-  // English: availability counter "available/total" (computed after fetch)
-  const [count, setCount] = React.useState("0/0");
+  if (!response.ok) {
+    return { value: null, status: response.status };
+  }
 
-  React.useEffect(() => {
-    let cancelled = false;
+  const data = (await response.json()) as unknown;
 
-    async function run() {
-      // English: reset placeholders before (re)loading
-      setRoeStr("—");
-      setRoaStr("—");
-      setNetMarginStr("—");
-      setFcfYieldStr("—");
-      setFcfMarginStr("—");
-      setOeYieldStr("—");
-      setCount("0/0");
+  if (typeof data === "number" && Number.isFinite(data)) {
+    return { value: data, status: response.status };
+  }
 
-      if (!sym) return;
+  if (typeof data !== "object" || data === null) {
+    return { value: null, status: response.status };
+  }
+
+  const row = data as Record<string, unknown>;
+
+  for (const key of candidateKeys) {
+    if (typeof row[key] === "number" && Number.isFinite(row[key])) {
+      return { value: row[key], status: response.status };
+    }
+  }
+
+  return { value: null, status: response.status };
+}
+
+function formatPercent(value: number | null | undefined, digits = 1) {
+  return value == null || !Number.isFinite(value) ? emptyValue : `${(value * 100).toFixed(digits)}%`;
+}
+
+function isValidMetric(value: number | null): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+export default function ProfitabilitySection({
+  symbol,
+  showROE = false,
+  showNetMargin = false,
+  showFcfYield = false,
+}: ProfitabilitySectionProps) {
+  const normalizedSymbol = symbol.trim().toUpperCase();
+
+  const [returnOnEquity, setReturnOnEquity] = useState(emptyValue);
+  const [returnOnAssets, setReturnOnAssets] = useState(emptyValue);
+  const [netMargin, setNetMargin] = useState(emptyValue);
+  const [freeCashFlowYield, setFreeCashFlowYield] = useState(emptyValue);
+  const [freeCashFlowMargin, setFreeCashFlowMargin] = useState(emptyValue);
+  const [ownerEarningsYield, setOwnerEarningsYield] = useState(emptyValue);
+  const [loadedCount, setLoadedCount] = useState(0);
+
+  const totalVisibleMetrics = useMemo(
+    () =>
+      (showROE ? 1 : 0) +
+      1 +
+      (showNetMargin ? 1 : 0) +
+      (showFcfYield ? 1 : 0) +
+      1 +
+      1,
+    [showROE, showNetMargin, showFcfYield],
+  );
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadMetrics = async () => {
+      setReturnOnEquity(emptyValue);
+      setReturnOnAssets(emptyValue);
+      setNetMargin(emptyValue);
+      setFreeCashFlowYield(emptyValue);
+      setFreeCashFlowMargin(emptyValue);
+      setOwnerEarningsYield(emptyValue);
+      setLoadedCount(0);
+
+      if (!normalizedSymbol) {
+        return;
+      }
 
       try {
-        // English: fetch all profitability metrics in parallel
-        const [roeRes, roaRes, netMarginRes, fcfYieldRes, fcfMarginRes, oeYieldRes] =
-          await Promise.all([
-            fetchMetricNumber(backendBase, "/api/analytics/roe", sym, ["value", "roe"]),
-            fetchMetricNumber(backendBase, "/api/analytics/roa", sym, ["value", "roa"]),
-            fetchMetricNumber(backendBase, "/api/analytics/net-margin", sym, [
-              "value",
-              "netMargin",
-            ]),
-            fetchMetricNumber(backendBase, "/api/analytics/fcf-yield", sym, ["value", "fcfYield"]),
-            fetchMetricNumber(backendBase, "/api/analytics/fcf-margin", sym, [
-              "value",
-              "fcfMargin",
-            ]),
-            fetchMetricNumber(backendBase, "/api/analytics/owner-earnings-yield", sym, [
-              "value",
-              "ownerEarningsYield",
-            ]),
-          ]);
+        const [
+          returnOnEquityResult,
+          returnOnAssetsResult,
+          netMarginResult,
+          freeCashFlowYieldResult,
+          freeCashFlowMarginResult,
+          ownerEarningsYieldResult,
+        ] = await Promise.all([
+          fetchMetricNumber("/api/analytics/roe", normalizedSymbol, ["value", "roe"]),
+          fetchMetricNumber("/api/analytics/roa", normalizedSymbol, ["value", "roa"]),
+          fetchMetricNumber("/api/analytics/net-margin", normalizedSymbol, [
+            "value",
+            "netMargin",
+          ]),
+          fetchMetricNumber("/api/analytics/fcf-yield", normalizedSymbol, ["value", "fcfYield"]),
+          fetchMetricNumber("/api/analytics/fcf-margin", normalizedSymbol, [
+            "value",
+            "fcfMargin",
+          ]),
+          fetchMetricNumber("/api/analytics/owner-earnings-yield", normalizedSymbol, [
+            "value",
+            "ownerEarningsYield",
+          ]),
+        ]);
 
-        if (cancelled) return;
+        if (!isMounted) {
+          return;
+        }
 
-        // English: normalize presence flags
-        const roeOk = Number.isFinite(roeRes.value as number);
-        const roaOk = Number.isFinite(roaRes.value as number);
-        const nmOk = Number.isFinite(netMarginRes.value as number);
-        const fcfyOk = Number.isFinite(fcfYieldRes.value as number);
-        const fcfmOk = Number.isFinite(fcfMarginRes.value as number);
-        const oeyOk = Number.isFinite(oeYieldRes.value as number);
+        const hasReturnOnEquity = isValidMetric(returnOnEquityResult.value);
+        const hasReturnOnAssets = isValidMetric(returnOnAssetsResult.value);
+        const hasNetMargin = isValidMetric(netMarginResult.value);
+        const hasFreeCashFlowYield = isValidMetric(freeCashFlowYieldResult.value);
+        const hasFreeCashFlowMargin = isValidMetric(freeCashFlowMarginResult.value);
+        const hasOwnerEarningsYield = isValidMetric(ownerEarningsYieldResult.value);
 
-        // English: set formatted strings (only when present)
-        if (roeOk) setRoeStr(fmtPercent(roeRes.value!));
-        if (roaOk) setRoaStr(fmtPercent(roaRes.value!));
-        if (nmOk) setNetMarginStr(fmtPercent(netMarginRes.value!));
-        if (fcfyOk) setFcfYieldStr(fmtPercent(fcfYieldRes.value!));
-        if (fcfmOk) setFcfMarginStr(fmtPercent(fcfMarginRes.value!));
-        if (oeyOk) setOeYieldStr(fmtPercent(oeYieldRes.value!));
+        if (hasReturnOnEquity) {
+          setReturnOnEquity(formatPercent(returnOnEquityResult.value));
+        }
 
-        // English: compute availability for VISIBLE metrics only
-        const totalVisible =
-          (showROE ? 1 : 0) + // ROE (toggle)
-          1 + // ROA (always visible here)
-          (showNetMargin ? 1 : 0) + // Net Margin (toggle)
-          (showFcfYield ? 1 : 0) + // FCF Yield (toggle)
-          1 + // FCF Margin (always visible)
-          1; // OE Yield (always visible)
+        if (hasReturnOnAssets) {
+          setReturnOnAssets(formatPercent(returnOnAssetsResult.value));
+        }
 
-        const available =
-          (showROE && roeOk ? 1 : 0) +
-          (roaOk ? 1 : 0) +
-          (showNetMargin && nmOk ? 1 : 0) +
-          (showFcfYield && fcfyOk ? 1 : 0) +
-          (fcfmOk ? 1 : 0) +
-          (oeyOk ? 1 : 0);
+        if (hasNetMargin) {
+          setNetMargin(formatPercent(netMarginResult.value));
+        }
 
-        setCount(`${available}/${totalVisible}`);
+        if (hasFreeCashFlowYield) {
+          setFreeCashFlowYield(formatPercent(freeCashFlowYieldResult.value));
+        }
+
+        if (hasFreeCashFlowMargin) {
+          setFreeCashFlowMargin(formatPercent(freeCashFlowMarginResult.value));
+        }
+
+        if (hasOwnerEarningsYield) {
+          setOwnerEarningsYield(formatPercent(ownerEarningsYieldResult.value));
+        }
+
+        const nextLoadedCount =
+          (showROE && hasReturnOnEquity ? 1 : 0) +
+          (hasReturnOnAssets ? 1 : 0) +
+          (showNetMargin && hasNetMargin ? 1 : 0) +
+          (showFcfYield && hasFreeCashFlowYield ? 1 : 0) +
+          (hasFreeCashFlowMargin ? 1 : 0) +
+          (hasOwnerEarningsYield ? 1 : 0);
+
+        setLoadedCount(nextLoadedCount);
       } catch {
-        // English: keep placeholders on error, count remains "0/0" (or you could set to visible total)
-        const totalVisible =
-          (showROE ? 1 : 0) + 1 + (showNetMargin ? 1 : 0) + (showFcfYield ? 1 : 0) + 1 + 1;
-        setCount(`0/${totalVisible}`);
+        if (isMounted) {
+          setLoadedCount(0);
+        }
       }
-    }
-
-    run();
-    return () => {
-      cancelled = true; // English: avoid setState after unmount
     };
-    // English: include toggles so count and visible columns react to props
-  }, [sym, backendBase, showROE, showNetMargin, showFcfYield]);
 
-  if (!sym) return null;
+    void loadMetrics();
 
-  // English: number of visible columns based on toggles
-  const cols =
-    (showROE ? 1 : 0) +
-    1 + // ROA
-    (showNetMargin ? 1 : 0) +
-    (showFcfYield ? 1 : 0) +
-    1 + // FCF Margin
-    1; // OE Yield
+    return () => {
+      isMounted = false;
+    };
+  }, [normalizedSymbol, showROE, showNetMargin, showFcfYield]);
+
+  if (!normalizedSymbol) {
+    return null;
+  }
 
   return (
     <div>
-      <SectionHeader title="Profitability" count={count} />
-      <SectionGrid cols={cols}>
-        {showROE && <MetricCard label="ROE" value={roeStr} />}
-        <MetricCard label="ROA" value={roaStr} />
-        {showNetMargin && <MetricCard label="Net Margin" value={netMarginStr} />}
-        {showFcfYield && <MetricCard label="FCF Yield" value={fcfYieldStr} />}
-        <MetricCard label="FCF Margin" value={fcfMarginStr} />
-        <MetricCard label="OE Yield" value={oeYieldStr} />
+      <SectionHeader title="Profitability" count={`${loadedCount}/${totalVisibleMetrics}`} />
+      <SectionGrid cols={totalVisibleMetrics}>
+        {showROE && <MetricCard label="ROE" value={returnOnEquity} />}
+        <MetricCard label="ROA" value={returnOnAssets} />
+        {showNetMargin && <MetricCard label="Net Margin" value={netMargin} />}
+        {showFcfYield && <MetricCard label="FCF Yield" value={freeCashFlowYield} />}
+        <MetricCard label="FCF Margin" value={freeCashFlowMargin} />
+        <MetricCard label="OE Yield" value={ownerEarningsYield} />
       </SectionGrid>
     </div>
   );

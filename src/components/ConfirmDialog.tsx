@@ -1,4 +1,6 @@
-import React from "react";
+import { useId } from "react";
+
+export type ConfirmDialogVariant = "danger" | "warning" | "info";
 
 interface ConfirmDialogProps {
   isOpen: boolean;
@@ -8,10 +10,16 @@ interface ConfirmDialogProps {
   cancelText?: string;
   onConfirm: () => void;
   onCancel: () => void;
-  variant?: "danger" | "warning" | "info";
+  variant?: ConfirmDialogVariant;
 }
 
-const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
+const confirmColorByVariant = {
+  danger: "#ef4444",
+  warning: "#f59e0b",
+  info: "#2563eb",
+} satisfies Record<ConfirmDialogVariant, string>;
+
+export default function ConfirmDialog({
   isOpen,
   title,
   message,
@@ -20,136 +28,108 @@ const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   onConfirm,
   onCancel,
   variant = "warning",
-}) => {
-  if (!isOpen) return null;
+}: ConfirmDialogProps) {
+  const titleId = useId();
+  const messageId = useId();
 
-  // Determine button color based on variant
-  const getConfirmButtonColor = () => {
-    switch (variant) {
-      case "danger":
-        return "#ef4444"; // red for destructive actions
-      case "warning":
-        return "#f59e0b"; // orange for warnings
-      case "info":
-        return "#3b82f6"; // blue for neutral info
-      default:
-        return "#f59e0b";
-    }
-  };
+  if (!isOpen) {
+    return null;
+  }
 
   return (
-    <>
-      {/* Backdrop overlay */}
-      <div
+    <div
+      role="presentation"
+      onClick={onCancel}
+      style={{
+        position: "fixed",
+        inset: 0,
+        backgroundColor: "rgba(0, 0, 0, 0.5)",
+        zIndex: 999,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 16,
+      }}
+    >
+      <section
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        aria-describedby={messageId}
+        onClick={(event) => event.stopPropagation()}
         style={{
-          position: "fixed",
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          backgroundColor: "rgba(0, 0, 0, 0.5)",
-          zIndex: 999,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
+          backgroundColor: "white",
+          borderRadius: 12,
+          padding: 24,
+          maxWidth: 400,
+          width: "100%",
+          boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1)",
         }}
-        onClick={onCancel} // Click outside to cancel
       >
-        {/* Dialog box */}
+        <h3
+          id={titleId}
+          style={{
+            margin: "0 0 12px 0",
+            fontSize: 18,
+            fontWeight: 600,
+          }}
+        >
+          {title}
+        </h3>
+
+        <p
+          id={messageId}
+          style={{
+            margin: "0 0 24px 0",
+            fontSize: 14,
+            color: "#4b5563",
+            lineHeight: 1.5,
+          }}
+        >
+          {message}
+        </p>
+
         <div
           style={{
-            backgroundColor: "white",
-            borderRadius: "12px",
-            padding: "24px",
-            maxWidth: "400px",
-            width: "90%",
-            boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1)",
-            position: "relative",
+            display: "flex",
+            gap: 12,
+            justifyContent: "flex-end",
           }}
-          onClick={(e) => e.stopPropagation()} // Prevent closing when clicking inside
         >
-          {/* Title */}
-          <h3
+          <button
+            type="button"
+            onClick={onCancel}
             style={{
-              margin: "0 0 12px 0",
-              fontSize: "18px",
-              fontWeight: 600,
+              padding: "8px 16px",
+              backgroundColor: "#f3f4f6",
+              border: "1px solid #d1d5db",
+              borderRadius: 8,
+              fontSize: 14,
+              fontWeight: 500,
+              cursor: "pointer",
             }}
           >
-            {title}
-          </h3>
+            {cancelText}
+          </button>
 
-          {/* Message */}
-          <p
+          <button
+            type="button"
+            onClick={onConfirm}
             style={{
-              margin: "0 0 24px 0",
-              fontSize: "14px",
-              color: "#4b5563",
-              lineHeight: 1.5,
+              padding: "8px 16px",
+              backgroundColor: confirmColorByVariant[variant],
+              color: "white",
+              border: "none",
+              borderRadius: 8,
+              fontSize: 14,
+              fontWeight: 500,
+              cursor: "pointer",
             }}
           >
-            {message}
-          </p>
-
-          {/* Buttons */}
-          <div
-            style={{
-              display: "flex",
-              gap: "12px",
-              justifyContent: "flex-end",
-            }}
-          >
-            {/* Cancel button */}
-            <button
-              onClick={onCancel}
-              style={{
-                padding: "8px 16px",
-                backgroundColor: "#f3f4f6",
-                border: "1px solid #d1d5db",
-                borderRadius: "8px",
-                fontSize: "14px",
-                fontWeight: 500,
-                cursor: "pointer",
-                transition: "background-color 0.2s",
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.backgroundColor = "#e5e7eb";
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.backgroundColor = "#f3f4f6";
-              }}
-            >
-              {cancelText}
-            </button>
-
-            {/* Confirm button */}
-            <button
-              onClick={onConfirm}
-              style={{
-                padding: "8px 16px",
-                backgroundColor: getConfirmButtonColor(),
-                color: "white",
-                border: "none",
-                borderRadius: "8px",
-                fontSize: "14px",
-                fontWeight: 500,
-                cursor: "pointer",
-                transition: "opacity 0.2s",
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.opacity = "0.9";
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.opacity = "1";
-              }}
-            >
-              {confirmText}
-            </button>
-          </div>
+            {confirmText}
+          </button>
         </div>
-      </div>
-    </>
+      </section>
+    </div>
   );
-};
-
-export default ConfirmDialog;
+}

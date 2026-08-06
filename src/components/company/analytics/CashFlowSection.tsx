@@ -1,93 +1,161 @@
-// src/components/company/analytics/CashFlowSection.tsx
-import * as React from "react";
-import { SectionHeader, SectionGrid, MetricCard } from "./ui";
-import { useFormatDisplayValue } from "../../../utils/formatDisplayValue";
+import { useContext, useEffect, useState } from "react";
+
 import { CurrencyContext } from "../../../context/CurrencyContextObject";
 import { useCurrencyFade } from "../../../hooks/useCurrencyFade";
+import { useFormatDisplayValue } from "../../../utils/formatDisplayValue";
+import { MetricCard, SectionGrid, SectionHeader } from "./ui";
 
-async function fetchMetricNumber(path: string, symbol: string, keys: string[]) {
-  const resp = await fetch(`${path}?symbol=${encodeURIComponent(symbol)}`, {
-    headers: { Accept: "application/json" },
-  });
-  if (!resp.ok) return { value: null as number | null, status: resp.status };
-  const raw = await resp.json();
-  if (typeof raw === "number") return { value: raw, status: resp.status };
-  if (raw && typeof raw === "object") {
-    const o = raw as Record<string, unknown>;
-    for (const k of keys)
-      if (typeof o[k] === "number") return { value: o[k] as number, status: resp.status };
-  }
-  return { value: null as number | null, status: resp.status };
+type MetricResult = {
+  value: number | null;
+  status: number;
+};
+
+interface CashFlowSectionProps {
+  symbol: string;
 }
 
-export default function CashFlowSection({ symbol }: { symbol: string }) {
-  const sym = (symbol ?? "").trim().toUpperCase();
+const totalMetrics = 2;
+
+async function fetchMetricNumber(
+  path: string,
+  symbol: string,
+  keys: string[],
+): Promise<MetricResult> {
+  const response = await fetch(`${path}?symbol=${encodeURIComponent(symbol)}`, {
+    headers: { Accept: "application/json" },
+  });
+
+  if (!response.ok) {
+    return { value: null, status: response.status };
+  }
+
+  const data = (await response.json()) as unknown;
+
+  if (typeof data === "number") {
+    return { value: data, status: response.status };
+  }
+
+  if (typeof data !== "object" || data === null) {
+    return { value: null, status: response.status };
+  }
+
+  const row = data as Record<string, unknown>;
+
+  for (const key of keys) {
+    if (typeof row[key] === "number") {
+      return { value: row[key], status: response.status };
+    }
+  }
+
+  return { value: null, status: response.status };
+}
+
+export default function CashFlowSection({ symbol }: CashFlowSectionProps) {
+  const normalizedSymbol = symbol.trim().toUpperCase();
+  const currencyContext = useContext(CurrencyContext);
   const { formatDisplayValue } = useFormatDisplayValue();
   const { fadeClass } = useCurrencyFade();
 
-  const [fcf, setFcf] = React.useState("—");
-  const [oe, setOe] = React.useState("—");
-  const [baseValues, setBaseValues] = React.useState<{ fcf?: number; oe?: number }>({});
-  const TOTAL = 2;
-  const [count, setCount] = React.useState(`0/${TOTAL}`);
-  const { currency } = React.useContext(CurrencyContext)!;
+  if (!currencyContext) {
+    throw new Error("CashFlowSection must be used inside CurrencyProvider.");
+  }
 
-  // 🧩 Initial load
-  React.useEffect(() => {
-    let cancelled = false;
-    async function run() {
-      setFcf("—");
-      setOe("—");
-      setCount(`0/${TOTAL}`);
-      if (!sym) return;
+  const { currency } = currencyContext;
+
+  const [freeCashFlow, setFreeCashFlow] = useState("—");
+  const [ownerEarnings, setOwnerEarnings] = useState("—");
+  const [baseValues, setBaseValues] = useState<{
+    freeCashFlow?: number;
+    ownerEarnings?: number;
+  }>({});
+  const [loadedCount, setLoadedCount] = useState(0);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadMetrics = async () => {
+      setFreeCashFlow("—");
+      setOwnerEarnings("—");
+      setBaseValues({});
+      setLoadedCount(0);
+
+      if (!normalizedSymbol) {
+        return;
+      }
 
       try {
-        const [fcfR, oeR] = await Promise.all([
-          fetchMetricNumber("/api/analytics/fcf", sym, ["value", "fcf"]),
-          fetchMetricNumber("/api/analytics/owner-earnings", sym, ["value", "ownerEarnings"]),
+        const [freeCashFlowResult, ownerEarningsResult] = await Promise.all([
+          fetchMetricNumber("/api/analytics/fcf", normalizedSymbol, ["value", "fcf"]),
+          fetchMetricNumber("/api/analytics/owner-earnings", normalizedSymbol, [
+            "value",
+            "ownerEarnings",
+          ]),
         ]);
 
-        if (cancelled) return;
-
-        const fOk = Number.isFinite(fcfR.value as number);
-        const oOk = Number.isFinite(oeR.value as number);
-
-        if (fOk) {
-          setBaseValues((p) => ({ ...p, fcf: fcfR.value! }));
-          setFcf(formatDisplayValue("FCF (abs)", fcfR.value!));
-        }
-        if (oOk) {
-          setBaseValues((p) => ({ ...p, oe: oeR.value! }));
-          setOe(formatDisplayValue("Owner Earnings", oeR.value!));
+        if (!isMounted) {
+          return;
         }
 
-        setCount(`${(fOk ? 1 : 0) + (oOk ? 1 : 0)}/${TOTAL}`);
+        const nextBaseValues: {
+          freeCashFlow?: number;
+          ownerEarnings?: number;
+        } = {};
+
+        let nextLoadedCount = 0;
+
+        if (typeof freeCashFlowResult.value === "number" && Number.isFinite(freeCashFlowResult.value)) {
+          nextBaseValues.freeCashFlow = freeCashFlowResult.value;
+          setFreeCashFlow(formatDisplayValue("FCF (abs)", freeCashFlowResult.value));
+          nextLoadedCount += 1;
+        }
+
+        if (typeof ownerEarningsResult.value === "number" && Number.isFinite(ownerEarningsResult.value)) {
+          nextBaseValues.ownerEarnings = ownerEarningsResult.value;
+          setOwnerEarnings(formatDisplayValue("Owner Earnings", ownerEarningsResult.value));
+          nextLoadedCount += 1;
+        }
+
+        setBaseValues(nextBaseValues);
+        setLoadedCount(nextLoadedCount);
       } catch {
-        setCount(`0/${TOTAL}`);
+        if (!isMounted) {
+          return;
+        }
+
+        setLoadedCount(0);
       }
-    }
-    run();
-    return () => {
-      cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sym]);
 
-  // 💱 Reformat when currency changes
-  React.useEffect(() => {
-    console.log(`[CashFlowSection] Reformat due to currency change → ${currency}`);
-    if (baseValues.fcf != null) setFcf(formatDisplayValue("FCF (abs)", baseValues.fcf));
-    if (baseValues.oe != null) setOe(formatDisplayValue("Owner Earnings", baseValues.oe));
-  }, [currency, baseValues, formatDisplayValue]);
+    void loadMetrics();
 
-  if (!sym) return null;
+    return () => {
+      isMounted = false;
+    };
+  }, [formatDisplayValue, normalizedSymbol]);
+
+  useEffect(() => {
+    if (baseValues.freeCashFlow != null) {
+      setFreeCashFlow(formatDisplayValue("FCF (abs)", baseValues.freeCashFlow));
+    }
+
+    if (baseValues.ownerEarnings != null) {
+      setOwnerEarnings(formatDisplayValue("Owner Earnings", baseValues.ownerEarnings));
+    }
+  }, [baseValues, currency, formatDisplayValue]);
+
+  if (!normalizedSymbol) {
+    return null;
+  }
 
   return (
     <div>
-      <SectionHeader title="Cash Flow & Owner Earnings" count={count} />
+      <SectionHeader title="Cash Flow & Owner Earnings" count={`${loadedCount}/${totalMetrics}`} />
       <SectionGrid cols={2}>
-        <MetricCard label="FCF (abs)" value={<span className={fadeClass}>{fcf}</span>} />
-        <MetricCard label="Owner Earnings" value={<span className={fadeClass}>{oe}</span>} />
+        <MetricCard label="FCF (abs)" value={<span className={fadeClass}>{freeCashFlow}</span>} />
+        <MetricCard
+          label="Owner Earnings"
+          value={<span className={fadeClass}>{ownerEarnings}</span>}
+        />
       </SectionGrid>
     </div>
   );

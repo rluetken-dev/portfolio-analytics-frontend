@@ -1,78 +1,74 @@
-import { useState, useRef, useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { CSSProperties } from "react";
 import { Link, useLocation, useMatch } from "react-router-dom";
-import { AuthBadge } from "./AuthBadge";
-import { useCurrency } from "../hooks/useCurrency";
-import type { CurrencyCode } from "../types/currency";
-import { useUserBalance } from "../hooks/useUserBalance";
-import { useContext } from "react";
-import { AuthContext } from "../context/auth-context";
-import { FundsPanel } from "./FundsPanel";
 
-/**
- * Top navigation bar.
- * - Static navigation links
- * - Dynamic company chip (on /company/:symbol)
- * - Global currency switcher with persistent state
- */
+import { AuthBadge } from "./AuthBadge";
+import { FundsPanel } from "./FundsPanel";
+import { useAuth } from "../hooks/useAuth";
+import { useCurrency } from "../hooks/useCurrency";
+import { useUserBalance } from "../hooks/useUserBalance";
+import type { CurrencyCode } from "../types/currency";
+
+const supportedCurrencies: CurrencyCode[] = ["USD", "EUR", "CHF", "GBP", "JPY"];
+
+const navStyle: CSSProperties = {
+  marginBottom: "1rem",
+  display: "flex",
+  alignItems: "center",
+  gap: 8,
+};
+
+const menuStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 16,
+};
+
+const panelStyle: CSSProperties = {
+  position: "absolute",
+  right: 0,
+  top: "calc(100% + 4px)",
+  background: "#1e1e1e",
+  border: "1px solid #333",
+  borderRadius: 8,
+  boxShadow: "0 4px 10px rgba(0,0,0,0.3)",
+  zIndex: 100,
+};
+
 export default function NavBar() {
   const { pathname } = useLocation();
+  const companyMatch = useMatch("/company/:symbol");
+  const companySymbol = companyMatch?.params.symbol?.toUpperCase();
+
+  const { isAuthenticated } = useAuth();
   const { currency, setCurrency, formatMoneyFrom } = useCurrency();
   const { cashBalance, refreshBalance } = useUserBalance();
 
-  // Access AuthContext safely to avoid undefined errors
-  const auth = useContext(AuthContext);
-  if (!auth) {
-    throw new Error("NavBar must be used within an AuthProvider");
-  }
-  const { isAuthenticated } = auth;
-
-  // --- Dropdown logic for currency menu ---
-  const [open, setOpen] = useState(false);
-  const [isAnimating, setIsAnimating] = useState(false);
-  const dropdownRef = useRef<HTMLDivElement>(null);
-  const fundsRef = useRef<HTMLDetailsElement>(null);
+  const [isCurrencyMenuOpen, setIsCurrencyMenuOpen] = useState(false);
+  const currencyMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (open) {
-      setIsAnimating(true);
-    } else {
-      const timeout = setTimeout(() => setIsAnimating(false), 200);
-      return () => clearTimeout(timeout);
-    }
-  }, [open]);
-
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-        setOpen(false);
+    const closeCurrencyMenu = (event: MouseEvent) => {
+      if (
+        currencyMenuRef.current &&
+        !currencyMenuRef.current.contains(event.target as Node)
+      ) {
+        setIsCurrencyMenuOpen(false);
       }
     };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
+
+    document.addEventListener("mousedown", closeCurrencyMenu);
+    return () => document.removeEventListener("mousedown", closeCurrencyMenu);
   }, []);
 
-  // --- Match company symbol from route ---
-  const match = useMatch("/company/:symbol");
-  const sym = match?.params.symbol?.toUpperCase();
-
-  // --- Style helper for links ---
-  const linkStyle = (to: string): React.CSSProperties => ({
-    marginRight: "1rem",
+  const linkStyle = (to: string): CSSProperties => ({
     textDecoration: pathname === to ? "underline" : "none",
     fontWeight: pathname === to ? 700 : 400,
   });
 
   return (
-    <nav
-      style={{
-        marginBottom: "1rem",
-        display: "flex",
-        alignItems: "center",
-        gap: 8,
-      }}
-    >
-      {/* Left: static navigation */}
-      <div>
+    <nav style={navStyle} aria-label="Main navigation">
+      <div style={menuStyle}>
         <Link to="/" style={linkStyle("/")}>
           Home
         </Link>
@@ -89,93 +85,81 @@ export default function NavBar() {
 
       <div style={{ flex: 1 }} />
 
-      {/* Show current company chip (if any) */}
-      {sym && (
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <Link
-            to={`/company/${sym}`}
-            title={`Open details for ${sym}`}
-            style={{
-              padding: "2px 8px",
-              borderRadius: 999,
-              border: "1px solid #22c55e",
-              background: "rgba(34, 197, 94, 0.12)",
-              color: "#22c55e",
-              textDecoration: "none",
-              fontSize: 12,
-              lineHeight: 1.2,
-              whiteSpace: "nowrap",
-            }}
-          >
-            Company: {sym}
-          </Link>
-        </div>
-      )}
-
-      {/* 💰 Show balance when logged in */}
-      {isAuthenticated && cashBalance !== null && (
-        <div
+      {companySymbol && (
+        <Link
+          to={`/company/${companySymbol}`}
+          title={`Open details for ${companySymbol}`}
           style={{
-            color: "#22c55e",
-            fontSize: 13,
-            fontWeight: 500,
-            marginRight: "1rem",
+            padding: "2px 8px",
+            borderRadius: 999,
+            border: "1px solid #22c55e",
+            background: "rgba(34, 197, 94, 0.12)",
+            color: "#15803d",
+            textDecoration: "none",
+            fontSize: 12,
+            lineHeight: 1.2,
             whiteSpace: "nowrap",
           }}
-          title="Current cash balance"
         >
-          {/* 💰 Format balance according to selected currency */}
-          💰 {formatMoneyFrom(cashBalance, "USD")}
+          Company: {companySymbol}
+        </Link>
+      )}
+
+      {isAuthenticated && cashBalance !== null && (
+        <div
+          title="Current cash balance"
+          style={{
+            color: "#15803d",
+            fontSize: 13,
+            fontWeight: 500,
+            whiteSpace: "nowrap",
+          }}
+        >
+          Cash: {formatMoneyFrom(cashBalance, "USD")}
         </div>
       )}
 
-     {/* 💸 Deposit / Withdraw Controls */}
-    {isAuthenticated && (
-      <div style={{ position: "relative", marginRight: "1rem" }}>
-        {/* Ref gehört hierher, nicht auf das äußere div */}
-        <details ref={fundsRef}>
-          <summary
-            style={{
-              cursor: "pointer",
-              fontSize: 13,
-              color: "#22c55e",
-              userSelect: "none",
-            }}
-          >
-            ⚙️ Funds
-          </summary>
+      {isAuthenticated && (
+        <div style={{ position: "relative" }}>
+          <details>
+            <summary
+              style={{
+                cursor: "pointer",
+                fontSize: 13,
+                color: "#15803d",
+                userSelect: "none",
+              }}
+            >
+              Funds
+            </summary>
 
-          <div
-            style={{
-              position: "absolute",
-              right: 0,
-              top: "100%",
-              background: "#1e1e1e",
-              border: "1px solid #333",
-              borderRadius: 8,
-              padding: "10px",
-              marginTop: 4,
-              zIndex: 99,
-              minWidth: 220,
-              display: "flex",
-              flexDirection: "column",
-              gap: 6,
-            }}
-          >
-            <FundsPanel
-              currencySymbol={formatMoneyFrom(0, currency).replace(/[\d.,]/g, "").trim() || "$"}
-              refreshBalance={refreshBalance}
-            />
-          </div>
-        </details>
-      </div>
-    )}
+            <div
+              style={{
+                ...panelStyle,
+                top: "100%",
+                padding: 10,
+                marginTop: 4,
+                minWidth: 220,
+                display: "flex",
+                flexDirection: "column",
+                gap: 6,
+              }}
+            >
+              <FundsPanel
+                currencySymbol={formatMoneyFrom(0, currency).replace(/[\d.,]/g, "").trim() || "$"}
+                refreshBalance={refreshBalance}
+              />
+            </div>
+          </details>
+        </div>
+      )}
 
-
-      {/* 💱 Currency Switcher Button */}
-      <div ref={dropdownRef} style={{ position: "relative", marginRight: "1rem" }}>
+      <div ref={currencyMenuRef} style={{ position: "relative" }}>
         <button
-          onClick={() => setOpen(!open)}
+          type="button"
+          aria-haspopup="menu"
+          aria-expanded={isCurrencyMenuOpen}
+          onClick={() => setIsCurrencyMenuOpen((current) => !current)}
           style={{
             background: "#111",
             border: "1px solid #444",
@@ -186,61 +170,45 @@ export default function NavBar() {
             fontSize: 13,
           }}
         >
-          💱 {currency} ▼
+          {currency}
         </button>
 
-        {/* Animated dropdown with delayed unmount */}
-        {(open || isAnimating) && (
+        {isCurrencyMenuOpen && (
           <div
+            role="menu"
             style={{
-              position: "absolute",
-              right: 0,
-              top: "calc(100% + 4px)",
-              background: "#1e1e1e",
-              border: "1px solid #333",
-              borderRadius: 8,
-              boxShadow: "0 4px 10px rgba(0,0,0,0.3)",
-              zIndex: 100,
+              ...panelStyle,
               minWidth: 100,
-              opacity: open ? 1 : 0,
-              transform: open ? "translateY(0)" : "translateY(-4px)",
-              transition: "opacity 0.25s ease, transform 0.25s cubic-bezier(0.25, 0.8, 0.25, 1)",
-              pointerEvents: open ? "auto" : "none",
+              overflow: "hidden",
             }}
           >
-            {["USD", "EUR", "CHF", "GBP", "JPY"].map((code) => (
-              <div
+            {supportedCurrencies.map((code) => (
+              <button
                 key={code}
+                type="button"
+                role="menuitem"
                 onClick={() => {
-                  setCurrency(code as CurrencyCode);
-                  setOpen(false);
+                  setCurrency(code);
+                  setIsCurrencyMenuOpen(false);
                 }}
                 style={{
+                  display: "block",
+                  width: "100%",
                   padding: "6px 12px",
+                  border: 0,
                   cursor: "pointer",
+                  textAlign: "left",
                   background: code === currency ? "#333" : "transparent",
                   color: code === currency ? "#22c55e" : "white",
-                  transition: "background 0.2s ease, color 0.2s ease",
-                }}
-                onMouseEnter={(e) => {
-                  (e.currentTarget as HTMLDivElement).style.background = "#2a2a2a";
-                  (e.currentTarget as HTMLDivElement).style.color = "#22c55e";
-                }}
-                onMouseLeave={(e) => {
-                  (e.currentTarget as HTMLDivElement).style.background =
-                    code === currency ? "#333" : "transparent";
-                  (e.currentTarget as HTMLDivElement).style.color =
-                    code === currency ? "#22c55e" : "white";
                 }}
               >
                 {code}
-              </div>
+              </button>
             ))}
           </div>
         )}
       </div>
 
-      {/* Always show AuthBadge */}
       <AuthBadge />
     </nav>
   );

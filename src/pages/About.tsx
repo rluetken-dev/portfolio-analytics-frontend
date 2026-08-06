@@ -1,10 +1,8 @@
-// src/pages/About.tsx
-
 export default function About() {
   return (
-    <div>
-      <h2>ℹ️ About</h2>
-      <p>This frontend is built with React + TypeScript + Vite.</p>
-    </div>
+    <main>
+      <h1>About</h1>
+      <p>This frontend is built with React, TypeScript, and Vite.</p>
+    </main>
   );
 }

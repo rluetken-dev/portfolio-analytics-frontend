@@ -1,8 +1,22 @@
-import * as React from "react";
+import type { ReactNode } from "react";
 
-/** Section header with small counter badge */
-// English: simple header for a metrics section
-export function SectionHeader({ title, count }: { title: string; count?: string }) {
+interface SectionHeaderProps {
+  title: string;
+  count?: string;
+}
+
+interface SectionGridProps {
+  cols: number;
+  children: ReactNode;
+}
+
+interface MetricCardProps {
+  label: string;
+  value: ReactNode;
+  hint?: string;
+}
+
+export function SectionHeader({ title, count }: SectionHeaderProps) {
   return (
     <div
       style={{
@@ -15,6 +29,7 @@ export function SectionHeader({ title, count }: { title: string; count?: string 
       }}
     >
       <span style={{ fontWeight: 600 }}>{title}</span>
+
       {count && (
         <span
           title="Available metrics in this section"
@@ -33,9 +48,7 @@ export function SectionHeader({ title, count }: { title: string; count?: string 
   );
 }
 
-/** Responsive grid for a row of metric cards */
-// English: grid row that auto-sizes to N columns
-export function SectionGrid({ cols, children }: { cols: number; children: React.ReactNode }) {
+export function SectionGrid({ cols, children }: SectionGridProps) {
   return (
     <div
       style={{
@@ -49,17 +62,7 @@ export function SectionGrid({ cols, children }: { cols: number; children: React.
   );
 }
 
-/** Atomic metric card */
-// English: small metric card with label, value and optional hint
-export function MetricCard({
-  label,
-  value,
-  hint,
-}: {
-  label: string;
-  value: React.ReactNode;
-  hint?: string;
-}) {
+export function MetricCard({ label, value, hint }: MetricCardProps) {
   return (
     <div
       style={{
@@ -73,10 +76,17 @@ export function MetricCard({
     >
       <div style={{ fontSize: 11, opacity: 0.8 }}>{label}</div>
       <div
-        style={{ fontSize: 16, fontWeight: 600, display: "flex", alignItems: "baseline", gap: 6 }}
+        style={{
+          fontSize: 16,
+          fontWeight: 600,
+          display: "flex",
+          alignItems: "baseline",
+          gap: 6,
+        }}
       >
         {value}
       </div>
+
       {hint && (
         <div
           title={hint}

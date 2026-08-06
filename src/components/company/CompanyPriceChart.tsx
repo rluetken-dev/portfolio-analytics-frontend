@@ -1,218 +1,288 @@
-// src/components/company/CompanyPriceChart.tsx
+import { useCallback, useContext, useEffect, useMemo, useState } from "react";
 import {
-  ResponsiveContainer,
-  AreaChart,
   Area,
+  AreaChart,
+  Brush,
+  CartesianGrid,
+  ResponsiveContainer,
+  Tooltip,
   XAxis,
   YAxis,
-  CartesianGrid,
-  Tooltip,
-  Brush,
 } from "recharts";
-import { useContext, useEffect, useState, useCallback, useMemo } from "react";
+
 import { CurrencyContext } from "../../context/CurrencyContextObject";
 import { convertCurrency } from "../../utils/currencyUtils";
 
-/* =========================================================
-   🧩 Types
-========================================================= */
-type Pt = { date: string; close: number };
+type PricePoint = {
+  date: string;
+  close: number;
+};
 
 type TimeseriesApiRow = {
   date?: string | null;
   close?: number | null;
 };
 
-type BrushRange = { startIndex?: number; endIndex?: number };
-type Range = { start: number; end: number } | null;
-
-type Props = {
-  symbol: string;
-  range: Range;
-  onRangeChange: (r: Range) => void;
+type BrushRange = {
+  startIndex?: number;
+  endIndex?: number;
 };
 
-type LatestQuote = { date: string; close: number };
+type ChartRange = {
+  start: number;
+  end: number;
+} | null;
 
-/* =========================================================
-   🧩 Utilities
-========================================================= */
+type LatestQuote = {
+  date: string;
+  close: number;
+};
 
-function fmtDate(d: Date) {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${dd}`;
+type CompanyPriceChartProps = {
+  symbol: string;
+  range: ChartRange;
+  onRangeChange: (range: ChartRange) => void;
+};
+
+function formatDateForApi(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
 }
 
-function parseISO(s: string): Date {
-  const d = new Date(s);
-  return Number.isNaN(+d) ? new Date(s.replace("Z", "")) : d;
+function parseDate(value: string): Date {
+  const parsedDate = new Date(value);
+  return Number.isNaN(parsedDate.getTime()) ? new Date(value.replace("Z", "")) : parsedDate;
 }
 
-function isFiniteNumber(x: unknown): x is number {
-  return typeof x === "number" && Number.isFinite(x);
-}
-function isNonEmptyString(x: unknown): x is string {
-  return typeof x === "string" && x.trim().length > 0;
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
 }
 
-/* =========================================================
-   🧩 API helpers
-========================================================= */
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
 
-async function fetchLatestQuote(baseUrl: string, symbol: string): Promise<LatestQuote | null> {
-  const qs = new URLSearchParams({ symbol });
-  const resp = await fetch(`${baseUrl}/api/Quotes/latest?${qs.toString()}`, {
+async function fetchLatestQuote(symbol: string): Promise<LatestQuote | null> {
+  const params = new URLSearchParams({ symbol });
+
+  const response = await fetch(`/api/Quotes/latest?${params.toString()}`, {
     headers: { Accept: "application/json" },
   });
-  if (!resp.ok) return null;
 
-  const raw: unknown = await resp.json();
-  if (typeof raw === "object" && raw !== null) {
-    const obj = raw as Record<string, unknown>;
-    const dateCandidate = obj["date"] ?? obj["Date"] ?? obj["tradingDate"] ?? obj["TradingDate"];
-    const closeCandidate = obj["close"] ?? obj["Close"];
-    if (isNonEmptyString(dateCandidate) && isFiniteNumber(closeCandidate)) {
-      return { date: dateCandidate, close: closeCandidate };
-    }
+  if (!response.ok) {
+    return null;
   }
-  return null;
+
+  const data = (await response.json()) as unknown;
+
+  if (typeof data !== "object" || data === null) {
+    return null;
+  }
+
+  const row = data as Record<string, unknown>;
+  const date = row.date ?? row.Date ?? row.tradingDate ?? row.TradingDate;
+  const close = row.close ?? row.Close;
+
+  if (!isNonEmptyString(date) || !isFiniteNumber(close)) {
+    return null;
+  }
+
+  return { date, close };
 }
 
-async function fetchTimeseries(
-  baseUrl: string,
-  symbol: string,
-  fromISO?: string,
-  toISO?: string,
-): Promise<Pt[]> {
-  const qs = new URLSearchParams({ symbol });
-  if (fromISO) qs.set("from", fromISO);
-  if (toISO) qs.set("to", toISO);
+async function fetchTimeseries(symbol: string, from?: string, to?: string): Promise<PricePoint[]> {
+  const params = new URLSearchParams({ symbol });
 
-  const resp = await fetch(`${baseUrl}/api/quotes/timeseries?${qs.toString()}`, {
+  if (from) {
+    params.set("from", from);
+  }
+
+  if (to) {
+    params.set("to", to);
+  }
+
+  const response = await fetch(`/api/quotes/timeseries?${params.toString()}`, {
     headers: { Accept: "application/json" },
   });
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
 
-  const raw: unknown = await resp.json();
-  const arr: TimeseriesApiRow[] = Array.isArray(raw) ? (raw as TimeseriesApiRow[]) : [];
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
 
-  return arr
-    .map(
-      (r): Pt => ({
-        date: String(r?.date ?? ""),
-        close: typeof r?.close === "number" ? r.close : NaN,
-      }),
-    )
-    .filter((p) => p.date && Number.isFinite(p.close))
-    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  const data = (await response.json()) as unknown;
+  const rows = Array.isArray(data) ? (data as TimeseriesApiRow[]) : [];
+
+  return rows
+    .map((row) => ({
+      date: String(row.date ?? ""),
+      close: typeof row.close === "number" ? row.close : Number.NaN,
+    }))
+    .filter((point) => point.date.length > 0 && Number.isFinite(point.close))
+    .sort((a, b) => a.date.localeCompare(b.date));
 }
 
-/* =========================================================
-   🧩 Component
-========================================================= */
+export default function CompanyPriceChart({
+  symbol,
+  range,
+  onRangeChange,
+}: CompanyPriceChartProps) {
+  const normalizedSymbol = symbol.trim().toUpperCase();
+  const currencyContext = useContext(CurrencyContext);
 
-export default function CompanyPriceChart({ symbol, range, onRangeChange }: Props) {
-  const sym = (symbol ?? "").trim().toUpperCase();
-  const backendBase = "";
+  if (!currencyContext) {
+    throw new Error("CompanyPriceChart must be used inside CurrencyProvider.");
+  }
 
-  const { currency, formatMoneyFrom } = useContext(CurrencyContext)!;
+  const { currency, formatMoneyFrom } = currencyContext;
 
-  const [baseData, setBaseData] = useState<Pt[]>([]);
-  const [data, setData] = useState<Pt[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState<string | null>(null);
+  const [baseData, setBaseData] = useState<PricePoint[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // 🔄 Load base USD data
   useEffect(() => {
-    let aborted = false;
+    let isMounted = true;
 
-    async function run() {
-      if (!sym) {
-        setData([]);
-        setLoading(false);
+    const loadPriceData = async () => {
+      if (!normalizedSymbol) {
+        setBaseData([]);
+        setIsLoading(false);
         return;
       }
 
+      setIsLoading(true);
+      setErrorMessage(null);
+
       try {
-        setLoading(true);
-        setErr(null);
+        const latestQuote = await fetchLatestQuote(normalizedSymbol);
+        let pricePoints: PricePoint[];
 
-        const latest = await fetchLatestQuote(backendBase, sym);
-        let pts: Pt[] = [];
+        if (latestQuote?.date) {
+          const endDate = new Date(latestQuote.date);
+          const startDate = new Date(endDate);
+          startDate.setDate(endDate.getDate() - 180);
 
-        if (latest?.date) {
-          const to = new Date(latest.date);
-          const from = new Date(to);
-          from.setDate(to.getDate() - 180);
-          pts = await fetchTimeseries(backendBase, sym, fmtDate(from), fmtDate(to));
+          pricePoints = await fetchTimeseries(
+            normalizedSymbol,
+            formatDateForApi(startDate),
+            formatDateForApi(endDate),
+          );
         } else {
-          pts = await fetchTimeseries(backendBase, sym);
+          pricePoints = await fetchTimeseries(normalizedSymbol);
         }
 
-        if (aborted) return;
-        setBaseData(pts);
-        setData(pts);
+        if (!isMounted) {
+          return;
+        }
+
+        setBaseData(pricePoints);
         onRangeChange(null);
-      } catch (e) {
-        if (aborted) return;
-        setErr(e instanceof Error ? e.message : String(e));
-        setData([]);
+      } catch (error) {
+        if (!isMounted) {
+          return;
+        }
+
+        setBaseData([]);
+        setErrorMessage(error instanceof Error ? error.message : "Price data could not be loaded.");
       } finally {
-        if (!aborted) setLoading(false);
+        if (isMounted) {
+          setIsLoading(false);
+        }
       }
-    }
-
-    run();
-    return () => {
-      aborted = true;
     };
-  }, [sym, backendBase, onRangeChange]);
 
-  // 💱 Recalculate on currency change
-  useEffect(() => {
-    if (!baseData.length) return;
+    void loadPriceData();
 
-    const converted = baseData.map((p) => ({
-      ...p,
-      close: convertCurrency(p.close, "USD", currency),
-    }));
+    return () => {
+      isMounted = false;
+    };
+  }, [normalizedSymbol, onRangeChange]);
 
-    setData(converted);
-  }, [currency, baseData]);
-
-  // 📊 Handle zoom/view
-  const view = useMemo(() => {
-    if (!data.length) return [];
-    if (!range) return data;
-    const start = Math.max(0, Math.min(range.start, data.length - 1));
-    const end = Math.max(start, Math.min(range.end, data.length - 1));
-    return data.slice(start, end + 1);
-  }, [data, range]);
-
-  const resetView = useCallback(() => onRangeChange(null), [onRangeChange]);
-
-  // 🧠 Formatters
-  const tickFmt = useCallback((iso: string) => {
-    const d = parseISO(iso);
-    return d.toLocaleDateString(undefined, { month: "short", year: "2-digit" });
-  }, []);
-
-  const tooltipFmt = useCallback(
-    (value: number | string): string => {
-      const n = typeof value === "number" ? value : Number(value);
-      if (!Number.isFinite(n)) return "n/a";
-      return formatMoneyFrom(n, "USD");
-    },
-    [formatMoneyFrom],
+  const chartData = useMemo(
+    () =>
+      baseData.map((point) => ({
+        ...point,
+        close: convertCurrency(point.close, "USD", currency),
+      })),
+    [baseData, currency],
   );
 
-  if (!sym) return null;
+  const visibleData = useMemo(() => {
+    if (chartData.length === 0) {
+      return [];
+    }
 
-  const fullMax = Math.max(0, data.length - 1);
-  const currentStart = range ? Math.max(0, Math.min(range.start, fullMax)) : 0;
-  const currentEnd = range ? Math.max(currentStart, Math.min(range.end, fullMax)) : fullMax;
+    if (!range) {
+      return chartData;
+    }
+
+    const start = Math.max(0, Math.min(range.start, chartData.length - 1));
+    const end = Math.max(start, Math.min(range.end, chartData.length - 1));
+
+    return chartData.slice(start, end + 1);
+  }, [chartData, range]);
+
+  const resetView = useCallback(() => {
+    onRangeChange(null);
+  }, [onRangeChange]);
+
+  const formatDateTick = useCallback((date: string) => {
+    return parseDate(date).toLocaleDateString(undefined, {
+      month: "short",
+      year: "2-digit",
+    });
+  }, []);
+
+  const formatTooltipValue = useCallback(
+    (value: number | string) => {
+      const numericValue = typeof value === "number" ? value : Number(value);
+
+      if (!Number.isFinite(numericValue)) {
+        return "n/a";
+      }
+
+      return formatMoneyFrom(numericValue, currency);
+    },
+    [currency, formatMoneyFrom],
+  );
+
+  const handleBrushChange = useCallback(
+    (brushRange: BrushRange | undefined) => {
+      if (
+        !brushRange ||
+        typeof brushRange.startIndex !== "number" ||
+        typeof brushRange.endIndex !== "number"
+      ) {
+        return;
+      }
+
+      const maxIndex = Math.max(0, chartData.length - 1);
+      const minimumRangeSize = Math.min(5, maxIndex);
+
+      let start = Math.max(0, Math.min(brushRange.startIndex, maxIndex));
+      let end = Math.max(start, Math.min(brushRange.endIndex, maxIndex));
+
+      if (end - start < minimumRangeSize) {
+        const center = Math.round((start + end) / 2);
+        start = Math.max(0, center - Math.floor(minimumRangeSize / 2));
+        end = Math.min(maxIndex, start + minimumRangeSize);
+        start = Math.max(0, Math.min(start, end - minimumRangeSize));
+      }
+
+      onRangeChange({ start, end });
+    },
+    [chartData.length, onRangeChange],
+  );
+
+  if (!normalizedSymbol) {
+    return null;
+  }
+
+  const maxIndex = Math.max(0, chartData.length - 1);
+  const currentStart = range ? Math.max(0, Math.min(range.start, maxIndex)) : 0;
+  const currentEnd = range ? Math.max(currentStart, Math.min(range.end, maxIndex)) : maxIndex;
 
   return (
     <section style={{ marginTop: 12 }}>
@@ -226,8 +296,10 @@ export default function CompanyPriceChart({ symbol, range, onRangeChange }: Prop
         }}
       >
         <h2 style={{ margin: 0, fontSize: 16, opacity: 0.9 }}>Price (6M)</h2>
+
         {range && (
           <button
+            type="button"
             onClick={resetView}
             title="Reset zoom"
             style={{
@@ -245,25 +317,27 @@ export default function CompanyPriceChart({ symbol, range, onRangeChange }: Prop
         )}
       </div>
 
-      {err && <div style={{ marginBottom: 8, fontSize: 12, color: "#f87171" }}>{err}</div>}
+      {errorMessage && (
+        <div role="status" style={{ marginBottom: 8, fontSize: 12, color: "#f87171" }}>
+          {errorMessage}
+        </div>
+      )}
 
       <div style={{ height: 260, border: "1px solid #222", borderRadius: 12, padding: 8 }}>
-        {loading ? (
+        {isLoading ? (
           <div
+            role="status"
+            aria-label="Loading price chart"
             style={{
               height: "100%",
-              borderRadius: 8,
-              background:
-                "linear-gradient(90deg, rgba(255,255,255,0.06) 25%, rgba(255,255,255,0.12) 37%, rgba(255,255,255,0.06) 63%)",
-              backgroundSize: "400% 100%",
-              animation: "shine 1.2s ease-in-out infinite",
+              display: "grid",
+              placeItems: "center",
+              color: "#6b7280",
             }}
           >
-            <style>
-              {`@keyframes shine { 0%{background-position:100% 0;} 100%{background-position:0 0;} }`}
-            </style>
+            Loading price data...
           </div>
-        ) : data.length === 0 ? (
+        ) : chartData.length === 0 ? (
           <div style={{ height: "100%", display: "grid", placeItems: "center", opacity: 0.7 }}>
             No data
           </div>
@@ -278,29 +352,30 @@ export default function CompanyPriceChart({ symbol, range, onRangeChange }: Prop
           >
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart
-                data={view}
+                data={visibleData}
                 onDoubleClick={resetView}
                 margin={{ top: 8, right: 12, bottom: 0, left: 0 }}
               >
                 <defs>
-                  <linearGradient id="gPrice" x1="0" y1="0" x2="0" y2="1">
+                  <linearGradient id="company-price-gradient" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="0%" stopColor="currentColor" stopOpacity={0.35} />
                     <stop offset="100%" stopColor="currentColor" stopOpacity={0.05} />
                   </linearGradient>
                 </defs>
+
                 <CartesianGrid vertical={false} strokeOpacity={0.2} />
-                <XAxis dataKey="date" tickFormatter={tickFmt} minTickGap={28} tickMargin={8} />
+                <XAxis dataKey="date" tickFormatter={formatDateTick} minTickGap={28} tickMargin={8} />
                 <YAxis
                   domain={["auto", "auto"]}
                   tickCount={6}
-                  allowDecimals={true}
+                  allowDecimals
                   width={70}
-                  tickFormatter={(v) => formatMoneyFrom(v, "USD")}
+                  tickFormatter={(value) => formatMoneyFrom(Number(value), currency)}
                 />
                 <Tooltip
-                  formatter={tooltipFmt}
-                  labelFormatter={(iso) =>
-                    parseISO(String(iso)).toLocaleDateString(undefined, {
+                  formatter={formatTooltipValue}
+                  labelFormatter={(date) =>
+                    parseDate(String(date)).toLocaleDateString(undefined, {
                       year: "numeric",
                       month: "short",
                       day: "2-digit",
@@ -311,7 +386,7 @@ export default function CompanyPriceChart({ symbol, range, onRangeChange }: Prop
                   type="monotone"
                   dataKey="close"
                   stroke="currentColor"
-                  fill="url(#gPrice)"
+                  fill="url(#company-price-gradient)"
                   strokeWidth={2}
                   dot={false}
                   isAnimationActive={false}
@@ -321,7 +396,7 @@ export default function CompanyPriceChart({ symbol, range, onRangeChange }: Prop
             </ResponsiveContainer>
 
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={data} margin={{ top: 0, right: 12, bottom: 0, left: 0 }}>
+              <AreaChart data={chartData} margin={{ top: 0, right: 12, bottom: 0, left: 0 }}>
                 <XAxis dataKey="date" hide />
                 <YAxis domain={["dataMin", "dataMax"]} hide />
                 <Brush
@@ -330,21 +405,7 @@ export default function CompanyPriceChart({ symbol, range, onRangeChange }: Prop
                   travellerWidth={8}
                   startIndex={currentStart}
                   endIndex={currentEnd}
-                  onChange={(r: BrushRange | undefined) => {
-                    if (!r || typeof r.startIndex !== "number" || typeof r.endIndex !== "number")
-                      return;
-                    const max = Math.max(0, data.length - 1);
-                    const MIN = Math.min(5, max);
-                    let start = Math.max(0, Math.min(r.startIndex, max));
-                    let end = Math.max(start, Math.min(r.endIndex, max));
-                    if (end - start < MIN) {
-                      const center = Math.round((start + end) / 2);
-                      start = Math.max(0, center - Math.floor(MIN / 2));
-                      end = Math.min(max, start + MIN);
-                      start = Math.max(0, Math.min(start, end - MIN));
-                    }
-                    onRangeChange({ start, end });
-                  }}
+                  onChange={handleBrushChange}
                 />
               </AreaChart>
             </ResponsiveContainer>

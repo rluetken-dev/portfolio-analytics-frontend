@@ -37,7 +37,7 @@ type TimeseriesPoint = { date: string; close: number };
 // persist the last used symbol (dev-friendly)
 const STORAGE_KEY = "analytics:lastSymbol";
 
-// English: shared grid style so all sections render with identical column sizing
+// shared grid style so all sections render with identical column sizing
 const GRID: React.CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(6, minmax(0, 1fr))", // consistent width
@@ -47,7 +47,7 @@ const GRID: React.CSSProperties = {
 };
 
 const CARD: React.CSSProperties = {
-  // English: allow shrink inside grid track; prevent content from stretching columns
+  // allow shrink inside grid track; prevent content from stretching columns
   border: "1px solid #333",
   borderRadius: 8,
   padding: 6,
@@ -101,7 +101,7 @@ function SkeletonCard({ label }: { label: string }) {
   );
 }
 
-// // English: compact number formatter for big absolutes (K/M/B/T)
+// // compact number formatter for big absolutes (K/M/B/T)
 // function formatCompactNumber(n: number): string {
 //   const abs = Math.abs(n);
 //   const fmt = (v: number, s: string) =>
@@ -115,7 +115,7 @@ function SkeletonCard({ label }: { label: string }) {
 //   return abs >= 100 ? n.toFixed(0) : abs >= 10 ? n.toFixed(1) : n.toFixed(2);
 // }
 
-// // English: unified format helpers
+// // unified format helpers
 // function formatPercent(v: number | null | undefined): string {
 //   if (v == null || Number.isNaN(v)) return "n/a";
 //   return `${(v * 100).toFixed(1)}%`;
@@ -185,14 +185,14 @@ async function fetchMetricNumber(
   return { value: null, status: resp.status };
 }
 
-// English: build a per-section row grid that spans the full width
+// build a per-section row grid that spans the full width
 const makeRowGrid = (cols: number): React.CSSProperties => ({
   display: "grid",
   gridTemplateColumns: `repeat(${Math.max(cols, 1)}, minmax(0, 1fr))`,
   gap: 6,
 });
 
-// English: optional initial symbol + notify parent when active symbol changes
+// optional initial symbol + notify parent when active symbol changes
 export default function AnalyticsMiniPanel({
   initialSymbol,
   onSymbolChange,
@@ -205,33 +205,33 @@ export default function AnalyticsMiniPanel({
   // --- Core query & global UI state ---
   const [symbol, setSymbol] = useState<string>("");
 
-  // English: normalized symbol (must be declared early so helpers can use it)
+  // normalized symbol (must be declared early so helpers can use it)
   const currentSym = useMemo(() => symbol.trim().toUpperCase(), [symbol]);
 
-  const [loading, setLoading] = useState(false); // English: global page loading (metrics reload)
-  const [err, setErr] = useState<string | null>(null); // English: global banner error (rare)
+  const [loading, setLoading] = useState(false); // global page loading (metrics reload)
+  const [err, setErr] = useState<string | null>(null); // global banner error (rare)
 
   // --- Data caches shown in the panel ---
-  const [sections, setSections] = useState<MetricSection[]>([]); // English: normalized metrics groups
-  const [spark, setSpark] = useState<TimeseriesPoint[]>([]); // English: 180d sparkline points
-  const [live, setLive] = useState<CurrentQuote | null>(null); // English: latest live quote payload
-  const [baseClose, setBaseClose] = useState<number | null>(null); // English: last cached close for delta badge
+  const [sections, setSections] = useState<MetricSection[]>([]); // normalized metrics groups
+  const [spark, setSpark] = useState<TimeseriesPoint[]>([]); // 180d sparkline points
+  const [live, setLive] = useState<CurrentQuote | null>(null); // latest live quote payload
+  const [baseClose, setBaseClose] = useState<number | null>(null); // last cached close for delta badge
 
   // stores unformatted base values (always numeric, original currency)
   const [baseSections, setBaseSections] = useState<MetricSection[]>([]);
 
   // --- Fundamentals raw snapshot (debug/preview; not persisted) ---
-  const [fundRes, setFundRes] = useState<SnapshotResult | null>(null); // English: result of snapshot call
+  const [fundRes, setFundRes] = useState<SnapshotResult | null>(null); // result of snapshot call
 
   // --- Transient error pills per action (auto-hidden after 5s) ---
-  const [priceFetchErr, setPriceFetchErr] = useState<string | null>(null); // English: Get price data error
-  const [liveErr, setLiveErr] = useState<string | null>(null); // English: Get live price error
-  const [fundSnapErr, setFundSnapErr] = useState<string | null>(null); // English: Get fundamentals error
-  const [fundErr, setFundErr] = useState<string | null>(null); // English: Save fundamentals error
+  const [priceFetchErr, setPriceFetchErr] = useState<string | null>(null); // Get price data error
+  const [liveErr, setLiveErr] = useState<string | null>(null); // Get live price error
+  const [fundSnapErr, setFundSnapErr] = useState<string | null>(null); // Get fundamentals error
+  const [fundErr, setFundErr] = useState<string | null>(null); // Save fundamentals error
 
   // --- Pinned symbols (quick switch) ---
   const [pinned, setPinned] = useState<string[]>(() => {
-    // English: read pinned list from localStorage (uppercase, cap length)
+    // read pinned list from localStorage (uppercase, cap length)
     try {
       const raw = localStorage.getItem("analytics:pinned");
       if (raw) {
@@ -241,24 +241,24 @@ export default function AnalyticsMiniPanel({
         }
       }
     } catch (e) {
-      console.warn("[pinned] read failed:", e); // English: ignore storage read errors
+      console.warn("[pinned] read failed:", e); // ignore storage read errors
     }
     return [];
   });
 
   const [confirmedSym, setConfirmedSym] = useState<string>("");
 
-  const typingRef = useRef(false); // English: blocks auto-load while user is editing
+  const typingRef = useRef(false); // blocks auto-load while user is editing
 
-  const searchRef = useRef<HTMLInputElement | null>(null); // English: track input element to detect focus
+  const searchRef = useRef<HTMLInputElement | null>(null); // track input element to detect focus
 
   const lastAnnouncedRef = useRef<string | null>(null);
 
-  const lastInitialSymRef = useRef<string | null>(null); // English: remember last adopted initialSymbol to avoid duplicates
+  const lastInitialSymRef = useRef<string | null>(null); // remember last adopted initialSymbol to avoid duplicates
 
   // --- Auto-refresh status indicator ---
-  const [autoStatus, setAutoStatus] = useState<string | null>(null); // English: small status line shown during freshness check
-  const [isStatusExiting, setIsStatusExiting] = useState(false); // English: controls fade-out animation
+  const [autoStatus, setAutoStatus] = useState<string | null>(null); // small status line shown during freshness check
+  const [isStatusExiting, setIsStatusExiting] = useState(false); // controls fade-out animation
 
   const { formatMoneyFrom, currency } = useContext(CurrencyContext)!;
   const { formatDisplayValue } = useFormatDisplayValue();
@@ -270,17 +270,17 @@ export default function AnalyticsMiniPanel({
     return valid.includes(u as CurrencyCode) ? (u as CurrencyCode) : "USD";
   };
 
-  // English: persist pinned list on change
+  // persist pinned list on change
   useEffect(() => {
     try {
       if (pinned.length === 0) localStorage.removeItem("analytics:pinned");
       else localStorage.setItem("analytics:pinned", JSON.stringify(pinned));
     } catch (e) {
-      console.warn("[pinned] write failed:", e); // English: ignore quota errors; best-effort
+      console.warn("[pinned] write failed:", e); // ignore quota errors; best-effort
     }
   }, [pinned]);
 
-  // English: remove a symbol from pinned
+  // remove a symbol from pinned
   const pinRemove = useCallback(
     (s: string): void => {
       setPinned((prev) => prev.filter((x) => x !== s));
@@ -291,7 +291,7 @@ export default function AnalyticsMiniPanel({
   // Centralized backend base (adjust if your backend port changes)
   const backendBase = useMemo(() => "", []);
 
-  // English: always resolve user input (name or symbol-ish) to a TICKER via backend search
+  // always resolve user input (name or symbol-ish) to a TICKER via backend search
   const resolveToTicker = useCallback(async (input: string): Promise<string | null> => {
     const q = (input ?? "").trim();
     if (!q) return null;
@@ -306,20 +306,20 @@ export default function AnalyticsMiniPanel({
       const sym = Array.isArray(arr) && arr.length > 0 ? arr[0]?.symbol : undefined;
       return sym ? String(sym).toUpperCase() : null;
     } catch {
-      return null; // English: best-effort; no fallback guess here
+      return null; // best-effort; no fallback guess here
     }
   }, []);
 
-  // English: add current selection to pinned, always as a TICKER symbol
+  // add current selection to pinned, always as a TICKER symbol
   const pinAddCurrent = useCallback(async (): Promise<void> => {
-    // English: try resolving from current input; if that fails, fall back to currentSym
+    // try resolving from current input; if that fails, fall back to currentSym
     const resolved = (await resolveToTicker(symbol)) ?? currentSym;
     if (!resolved) return;
 
     setPinned((prev) => (prev.includes(resolved) ? prev : [...prev, resolved]));
   }, [symbol, currentSym, resolveToTicker, setPinned]);
 
-  // English: auto-hide all error pills after 5s (status lines stay)
+  // auto-hide all error pills after 5s (status lines stay)
   useEffect(() => {
     if (!liveErr && !fundSnapErr && !fundErr && !priceFetchErr) return;
     const t = setTimeout(() => {
@@ -331,7 +331,7 @@ export default function AnalyticsMiniPanel({
     return () => clearTimeout(t);
   }, [liveErr, fundSnapErr, fundErr, priceFetchErr]);
 
-  // English: clear per-action status/errors/busy flags when switching company
+  // clear per-action status/errors/busy flags when switching company
   const resetActionUi = useCallback((): void => {
     // error pills
     setPriceFetchErr(null);
@@ -345,7 +345,7 @@ export default function AnalyticsMiniPanel({
     setBaseClose(null);
   }, []);
 
-  // English: whenever the symbol changes, wipe action UI to avoid stale statuses
+  // whenever the symbol changes, wipe action UI to avoid stale statuses
   useEffect(() => {
     resetActionUi();
     // Also clear sparkline/sections until next load
@@ -353,15 +353,15 @@ export default function AnalyticsMiniPanel({
     setSections([]);
   }, [resetActionUi, currentSym]);
 
-  // English: clear input + UI state and tell parent to deselect
+  // clear input + UI state and tell parent to deselect
   const handleClear = useCallback((): void => {
-    typingRef.current = true; // English: block any auto-load
-    setSymbol(""); // English: empty the search field
-    setConfirmedSym(""); // English: no confirmed selection
-    resetActionUi(); // English: clear per-action UI
-    setSections([]); // English: hide analytics panels
-    setSpark([]); // English: hide sparkline
-    onSymbolChange?.(""); // English: tell parent to clear list/pin highlight
+    typingRef.current = true; // block any auto-load
+    setSymbol(""); // empty the search field
+    setConfirmedSym(""); // no confirmed selection
+    resetActionUi(); // clear per-action UI
+    setSections([]); // hide analytics panels
+    setSpark([]); // hide sparkline
+    onSymbolChange?.(""); // tell parent to clear list/pin highlight
     // optional: focus back to input for quick typing
     searchRef.current?.focus();
   }, [resetActionUi, onSymbolChange]);
@@ -369,17 +369,17 @@ export default function AnalyticsMiniPanel({
   // --- Main load routine (your existing body kept intact) ---
   const load = useCallback(
     async (symOverride?: string) => {
-      const sym = (symOverride ?? symbol).trim().toUpperCase(); // English: prefer explicit symbol if provided
+      const sym = (symOverride ?? symbol).trim().toUpperCase(); // prefer explicit symbol if provided
       localStorage.setItem(STORAGE_KEY, sym);
       if (!sym) return;
 
-      // English: Do not load if user is currently typing in the search box
+      // Do not load if user is currently typing in the search box
       if (typingRef.current) return;
 
       setLoading(true);
       setErr(null);
 
-      // English: reset live delta when starting a fresh load
+      // reset live delta when starting a fresh load
       setLive(null);
       setBaseClose(null);
 
@@ -387,21 +387,21 @@ export default function AnalyticsMiniPanel({
         // 1) Latest price (already) …
         const price = await getLatestCloseFromQuotes(sym);
 
-        // English: store base close for later live delta calculation
+        // store base close for later live delta calculation
         setBaseClose(price.value ?? null);
 
         // 1b) Load timeseries (last 180 days) for sparkline, anchored to DB-latest date
         try {
-          // English: prefer 'asOf' from cached latest; else query /api/Quotes/latest
+          // prefer 'asOf' from cached latest; else query /api/Quotes/latest
           const fromCached =
             typeof price?.asOf === "string" && price.asOf.length >= 10
               ? price.asOf.slice(0, 10)
               : null;
-          const latestISO = fromCached ?? (await fetchLatestDateISO(backendBase, sym));
+          const latestISO = fromCached ?? (await fetchLatestDateISO(backendBase));
 
           let url: string;
           if (latestISO) {
-            // English: DB-anchored [latest-180d .. latest]
+            // DB-anchored [latest-180d .. latest]
             const to = new Date(latestISO);
             const from = new Date(to);
             from.setDate(to.getDate() - 180);
@@ -413,7 +413,7 @@ export default function AnalyticsMiniPanel({
             });
             url = `${backendBase}/api/quotes/timeseries?${qs.toString()}`;
           } else {
-            // English: no anchor available → let backend use its default/fallback window
+            // no anchor available → let backend use its default/fallback window
             const qs = new URLSearchParams({ symbol: sym });
             url = `${backendBase}/api/quotes/timeseries?${qs.toString()}`;
           }
@@ -426,7 +426,7 @@ export default function AnalyticsMiniPanel({
               ? (raw as Array<{ date?: unknown; close?: unknown }>)
               : [];
 
-            // English: defensive parse + chronological sort
+            // defensive parse + chronological sort
             const pts: TimeseriesPoint[] = arr
               .map((r) => ({
                 date: typeof r?.date === "string" ? r.date : String(r?.date ?? ""),
@@ -511,7 +511,7 @@ export default function AnalyticsMiniPanel({
           fetchMetricNumber(backendBase, "/api/analytics/fcf-margin", sym, ["value", "fcfMargin"]),
         ]);
 
-        // English: fallback via stable snapshot if analytics endpoints had no data
+        // fallback via stable snapshot if analytics endpoints had no data
         let peValue = peRes.value;
         let peHint = peRes.status === 200 ? undefined : `HTTP ${peRes.status}`;
 
@@ -519,7 +519,7 @@ export default function AnalyticsMiniPanel({
         let netMarginHint = netMarginRes.status === 200 ? undefined : `HTTP ${netMarginRes.status}`;
 
         if (peRes.status !== 200 || netMarginRes.status !== 200) {
-          // English: prefer already-fetched snapshot from state to avoid extra call
+          // prefer already-fetched snapshot from state to avoid extra call
           let snapshot = fundRes?.status === 200 ? fundRes.data : null;
 
           // If not present, fetch minimal snapshot (limit=1) with robust routing
@@ -747,17 +747,17 @@ export default function AnalyticsMiniPanel({
     setSections(updated);
   }, [currency, baseSections, formatMoneyFrom]);
 
-  // English: switch to a pinned symbol and trigger an immediate analytics load
+  // switch to a pinned symbol and trigger an immediate analytics load
   const pinSwitch = useCallback(
     (s: string): void => {
       const sym = (s ?? "").trim();
       if (!sym) return;
 
-      typingRef.current = false; // English: allow immediate load from pin
+      typingRef.current = false; // allow immediate load from pin
 
       setSymbol(sym);
       setConfirmedSym(sym);
-      resetActionUi(); // English: clear per-action UI for a fresh symbol view
+      resetActionUi(); // clear per-action UI for a fresh symbol view
       setTimeout(() => {
         load(sym).catch((err) => console.warn("[pinned] load failed:", err));
       }, 0);
@@ -765,7 +765,7 @@ export default function AnalyticsMiniPanel({
     [load, resetActionUi, setSymbol],
   );
 
-  // English: keep latest functions in refs so effects don't depend on them
+  // keep latest functions in refs so effects don't depend on them
   const loadFnRef = useRef(load);
   useEffect(() => {
     loadFnRef.current = load;
@@ -776,36 +776,36 @@ export default function AnalyticsMiniPanel({
     resetFnRef.current = resetActionUi;
   }, [resetActionUi]);
 
-  // English: Skip the very first non-empty initialSymbol from parent (no preselection on startup)
+  // Skip the very first non-empty initialSymbol from parent (no preselection on startup)
   const skipFirstAdoptionRef = useRef(false);
   useEffect(() => {
     const up = (initialSymbol ?? "").trim().toUpperCase();
     if (!up) return;
 
-    if (up === confirmedRef.current) return; // English: ignore parent echo of the already confirmed pin
+    if (up === confirmedRef.current) return; // ignore parent echo of the already confirmed pin
 
     if (skipFirstAdoptionRef.current) {
-      skipFirstAdoptionRef.current = false; // English: ignore the very first non-empty
-      lastInitialSymRef.current = up; // English: mark as seen so repeats won't adopt
+      skipFirstAdoptionRef.current = false; // ignore the very first non-empty
+      lastInitialSymRef.current = up; // mark as seen so repeats won't adopt
       return; // do not adopt/search-field-fill on initial startup
     }
 
     const inputFocused = searchRef.current != null && document.activeElement === searchRef.current;
 
     if (!inputFocused) {
-      setSymbol(up); // English: reflect list click in the search field
+      setSymbol(up); // reflect list click in the search field
     }
 
-    resetFnRef.current?.(); // English: clear per-action UI
-    typingRef.current = true; // English: wait for explicit Load
-    setSections([]); // English: hide analytics panels
-    setSpark([]); // English: hide sparkline
-    setConfirmedSym(""); // English: not confirmed yet
+    resetFnRef.current?.(); // clear per-action UI
+    typingRef.current = true; // wait for explicit Load
+    setSections([]); // hide analytics panels
+    setSpark([]); // hide sparkline
+    setConfirmedSym(""); // not confirmed yet
 
-    // English: do NOT auto-load here; user must confirm with Load
+    // do NOT auto-load here; user must confirm with Load
   }, [initialSymbol]);
 
-  // English: resolve query to a UNIQUE ticker; returns null if 0 or >1 matches
+  // resolve query to a UNIQUE ticker; returns null if 0 or >1 matches
   const resolveUniqueTicker = useCallback(
     async (query: string): Promise<string | null> => {
       const q = (query ?? "").trim();
@@ -1081,12 +1081,12 @@ export default function AnalyticsMiniPanel({
     return () => cancelAnimationFrame(id);
   }, [confirmedSym, onSymbolChange]);
 
-  const confirmedRef = useRef<string>(""); // English: mirror of confirmedSym for effects that must not re-run
+  const confirmedRef = useRef<string>(""); // mirror of confirmedSym for effects that must not re-run
   useEffect(() => {
-    confirmedRef.current = confirmedSym; // English: keep ref in sync with state
+    confirmedRef.current = confirmedSym; // keep ref in sync with state
   }, [confirmedSym]);
 
-  // English: run auto-refresh check whenever a new symbol is confirmed (panel opened)
+  // run auto-refresh check whenever a new symbol is confirmed (panel opened)
   useEffect(() => {
     if (!confirmedSym) return;
 
@@ -1115,7 +1115,7 @@ export default function AnalyticsMiniPanel({
     >
       <div style={{ fontWeight: 600 }}>Analytics</div>
 
-      {/* English: render pinned buttons */}
+      {/* render pinned buttons */}
       <div
         style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginBottom: 6 }}
       >
@@ -1184,21 +1184,21 @@ export default function AnalyticsMiniPanel({
         </button>
       </div>
 
-      {/* English: Search bar + button */}
+      {/* Search bar + button */}
       <div style={{ display: "flex", gap: 8 }}>
         <input
-          ref={searchRef} // English: needed to know if input is focused
+          ref={searchRef} // needed to know if input is focused
           value={symbol}
           onKeyDown={async (e) => {
             if (e.key === "Enter" && !loading) {
               e.preventDefault();
-              await handleResolveAndLoad(); // English: resolve unique + load or clear
+              await handleResolveAndLoad(); // resolve unique + load or clear
             }
           }}
           onChange={(e) => {
             const v = e.target.value;
-            setSymbol(v); // English: keep raw typing in state (no normalization)
-            typingRef.current = true; // English: user started typing -> block auto-loads
+            setSymbol(v); // keep raw typing in state (no normalization)
+            typingRef.current = true; // user started typing -> block auto-loads
             setConfirmedSym("");
             resetActionUi();
             setSections([]);
@@ -1215,11 +1215,11 @@ export default function AnalyticsMiniPanel({
             border: "1px solid #333",
             background: "transparent",
             color: "inherit",
-            textTransform: "none", // English: ensure input preserves typed casing
-            fontVariantCaps: "normal", // English: avoid small-caps or other cap variants
+            textTransform: "none", // ensure input preserves typed casing
+            fontVariantCaps: "normal", // avoid small-caps or other cap variants
           }}
         />
-        {/* English: clear current query and UI */}
+        {/* clear current query and UI */}
         <button
           onClick={handleClear}
           title="Clear search"
@@ -1239,7 +1239,7 @@ export default function AnalyticsMiniPanel({
         <button
           onClick={async () => {
             if (loading) return;
-            await handleResolveAndLoad(); // English: same logic as Enter key
+            await handleResolveAndLoad(); // same logic as Enter key
           }}
           disabled={loading}
           style={{
@@ -1256,7 +1256,7 @@ export default function AnalyticsMiniPanel({
         </button>
       </div>
 
-      {/* English: animated status message for auto-refresh process */}
+      {/* animated status message for auto-refresh process */}
       {autoStatus && (
         <div
           style={{
@@ -1282,7 +1282,7 @@ export default function AnalyticsMiniPanel({
         </div>
       )}
 
-      {/* English: CSS keyframes for smooth animations */}
+      {/* CSS keyframes for smooth animations */}
       <style>
         {`
           @keyframes fadeSlideIn {
@@ -1334,7 +1334,7 @@ export default function AnalyticsMiniPanel({
                 }}
               >
                 {
-                  // English: count metrics that are not "n/a"
+                  // count metrics that are not "n/a"
                   (() => {
                     const available = sec.items.filter((i) => i.value !== "n/a").length;
                     return `${available}/${sec.items.length}`;
@@ -1355,7 +1355,7 @@ export default function AnalyticsMiniPanel({
 
                       {/* Value + optional live delta badge (only for Price) */}
                       <div
-                        // English: keep value and delta on one line, align baselines
+                        // keep value and delta on one line, align baselines
                         style={{
                           fontSize: 16,
                           fontWeight: 600,
@@ -1373,7 +1373,7 @@ export default function AnalyticsMiniPanel({
                           typeof baseClose === "number" &&
                           baseClose > 0 && (
                             <span
-                              // English: delta vs last cached close (color up/down)
+                              // delta vs last cached close (color up/down)
                               title={`Live vs last close: ${live.price - baseClose >= 0 ? "+" : ""}${(live.price - baseClose).toFixed(2)}`}
                               style={{
                                 fontSize: 12,
@@ -1414,7 +1414,7 @@ export default function AnalyticsMiniPanel({
         >
           <div style={{ fontSize: 12, opacity: 0.8, marginBottom: 6 }}>Price trend (180d)</div>
           <div style={{ width: "100%", height: 60 }}>
-            {/* English: pure SVG sparkline, no deps */}
+            {/* pure SVG sparkline, no deps */}
             <svg viewBox="0 0 600 60" preserveAspectRatio="none" width="100%" height="100%">
               <polyline
                 points={buildPolyline(spark, 600, 50)}

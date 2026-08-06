@@ -1,78 +1,136 @@
-// src/components/company/analytics/EfficiencySection.tsx
-import * as React from "react";
-import { SectionHeader, SectionGrid, MetricCard } from "./ui";
+import { useEffect, useState } from "react";
 
-async function fetchMetricNumber(baseUrl: string, path: string, symbol: string, keys: string[]) {
-  const resp = await fetch(`${baseUrl}${path}?symbol=${encodeURIComponent(symbol)}`, {
-    headers: { Accept: "application/json" },
-  });
-  if (!resp.ok) return { value: null as number | null, status: resp.status };
-  const raw = await resp.json();
-  if (typeof raw === "number") return { value: raw, status: resp.status };
-  if (raw && typeof raw === "object") {
-    const o = raw as Record<string, unknown>;
-    for (const k of keys)
-      if (typeof o[k] === "number") return { value: o[k] as number, status: resp.status };
-  }
-  return { value: null as number | null, status: resp.status };
+import { MetricCard, SectionGrid, SectionHeader } from "./ui";
+
+type MetricResult = {
+  value: number | null;
+  status: number;
+};
+
+interface EfficiencySectionProps {
+  symbol: string;
 }
 
-const fmtPercent = (v: number | null | undefined) =>
-  v == null || !Number.isFinite(v) ? "—" : `${(v * 100).toFixed(1)}%`;
-const fmtRatio = (v: number | null | undefined) =>
-  v == null || !Number.isFinite(v) ? "—" : `${v.toFixed(2)}x`;
+const totalMetrics = 2;
 
-export default function EfficiencySection({ symbol }: { symbol: string }) {
-  const sym = (symbol ?? "").trim().toUpperCase();
-  const backendBase = React.useMemo(() => "", []);
+async function fetchMetricNumber(
+  path: string,
+  symbol: string,
+  keys: string[],
+): Promise<MetricResult> {
+  const response = await fetch(`${path}?symbol=${encodeURIComponent(symbol)}`, {
+    headers: { Accept: "application/json" },
+  });
 
-  const [at, setAt] = React.useState("—");
-  const [cagr, setCagr] = React.useState("—");
-  const TOTAL = 2;
-  const [count, setCount] = React.useState(`0/${TOTAL}`);
+  if (!response.ok) {
+    return { value: null, status: response.status };
+  }
 
-  React.useEffect(() => {
-    let cancelled = false;
-    async function run() {
-      setAt("—");
-      setCagr("—");
-      setCount(`0/${TOTAL}`);
-      if (!sym) return;
+  const data = (await response.json()) as unknown;
+
+  if (typeof data === "number") {
+    return { value: data, status: response.status };
+  }
+
+  if (typeof data !== "object" || data === null) {
+    return { value: null, status: response.status };
+  }
+
+  const row = data as Record<string, unknown>;
+
+  for (const key of keys) {
+    if (typeof row[key] === "number") {
+      return { value: row[key], status: response.status };
+    }
+  }
+
+  return { value: null, status: response.status };
+}
+
+function formatPercent(value: number | null | undefined) {
+  return value == null || !Number.isFinite(value) ? "—" : `${(value * 100).toFixed(1)}%`;
+}
+
+function formatRatio(value: number | null | undefined) {
+  return value == null || !Number.isFinite(value) ? "—" : `${value.toFixed(2)}x`;
+}
+
+export default function EfficiencySection({ symbol }: EfficiencySectionProps) {
+  const normalizedSymbol = symbol.trim().toUpperCase();
+
+  const [assetTurnover, setAssetTurnover] = useState("—");
+  const [equityCagr, setEquityCagr] = useState("—");
+  const [loadedCount, setLoadedCount] = useState(0);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadMetrics = async () => {
+      setAssetTurnover("—");
+      setEquityCagr("—");
+      setLoadedCount(0);
+
+      if (!normalizedSymbol) {
+        return;
+      }
+
       try {
-        const [atR, cgR] = await Promise.all([
-          fetchMetricNumber(backendBase, "/api/analytics/asset-turnover", sym, [
+        const [assetTurnoverResult, equityCagrResult] = await Promise.all([
+          fetchMetricNumber("/api/analytics/asset-turnover", normalizedSymbol, [
             "value",
             "assetTurnover",
           ]),
-          fetchMetricNumber(backendBase, "/api/analytics/equity-cagr", sym, [
+          fetchMetricNumber("/api/analytics/equity-cagr", normalizedSymbol, [
             "value",
             "equityCagr",
             "cagr",
           ]),
         ]);
-        if (cancelled) return;
-        const atOk = Number.isFinite(atR.value as number);
-        const cgOk = Number.isFinite(cgR.value as number);
-        if (atOk) setAt(fmtRatio(atR.value!));
-        if (cgOk) setCagr(fmtPercent(cgR.value!));
-        setCount(`${(atOk ? 1 : 0) + (cgOk ? 1 : 0)}/${TOTAL}`);
-      } catch {
-        setCount(`0/${TOTAL}`);
-      }
-    }
-    run();
-    return () => {
-      cancelled = true;
-    };
-  }, [sym, backendBase]);
 
-  if (!sym) return null;
+        if (!isMounted) {
+          return;
+        }
+
+        let nextLoadedCount = 0;
+
+        if (
+          typeof assetTurnoverResult.value === "number" &&
+          Number.isFinite(assetTurnoverResult.value)
+        ) {
+          setAssetTurnover(formatRatio(assetTurnoverResult.value));
+          nextLoadedCount += 1;
+        }
+
+        if (typeof equityCagrResult.value === "number" && Number.isFinite(equityCagrResult.value)) {
+          setEquityCagr(formatPercent(equityCagrResult.value));
+          nextLoadedCount += 1;
+        }
+
+        setLoadedCount(nextLoadedCount);
+      } catch {
+        if (isMounted) {
+          setLoadedCount(0);
+        }
+      }
+    };
+
+    void loadMetrics();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [normalizedSymbol]);
+
+  if (!normalizedSymbol) {
+    return null;
+  }
+
   return (
     <div>
-      <SectionHeader title="Efficiency & Growth" count={count} />
+      <SectionHeader title="Efficiency & Growth" count={`${loadedCount}/${totalMetrics}`} />
       <SectionGrid cols={2}>
-        <MetricCard label="Asset Turnover" value={at} />
-        <MetricCard label="Equity CAGR" value={cagr} />
+        <MetricCard label="Asset Turnover" value={assetTurnover} />
+        <MetricCard label="Equity CAGR" value={equityCagr} />
       </SectionGrid>
     </div>
   );

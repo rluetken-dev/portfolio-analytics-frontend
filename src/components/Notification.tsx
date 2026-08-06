@@ -1,63 +1,73 @@
-import React, { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
+
+export type NotificationType = "success" | "error" | "info";
 
 interface NotificationProps {
   message: string;
-  type: "success" | "error" | "info";
-  duration?: number; // ms
+  type: NotificationType;
+  durationMs?: number;
   onClose: () => void;
 }
 
-const Notification: React.FC<NotificationProps> = ({ message, type, duration = 3000, onClose }) => {
+const backgroundColorByType = {
+  success: "#10b981",
+  error: "#ef4444",
+  info: "#2563eb",
+} satisfies Record<NotificationType, string>;
+
+export default function Notification({
+  message,
+  type,
+  durationMs = 3000,
+  onClose,
+}: NotificationProps) {
   const [isVisible, setIsVisible] = useState(true);
 
-  // auto-close after duration
   useEffect(() => {
-    const timer = setTimeout(() => {
+    const hideTimeoutId = window.setTimeout(() => {
       setIsVisible(false);
-      setTimeout(onClose, 300); // wait for fade out
-    }, duration);
+    }, durationMs);
 
-    return () => clearTimeout(timer);
-  }, [duration, onClose]);
+    const closeTimeoutId = window.setTimeout(() => {
+      onClose();
+    }, durationMs + 300);
 
-  const getStyles = () => {
-    const baseStyles = {
-      position: "fixed" as const,
-      bottom: "20px",
-      right: "20px",
-      padding: "12px 16px",
-      borderRadius: "8px",
-      color: "white",
-      fontSize: "14px",
-      fontWeight: 500,
-      zIndex: 1000,
-      transform: isVisible ? "translateX(0)" : "translateX(100%)",
-      opacity: isVisible ? 1 : 0,
-      transition: "all 0.3s ease",
-      cursor: "pointer",
-      boxShadow: "0 4px 12px rgba(0, 0, 0, 0.15)",
+    return () => {
+      window.clearTimeout(hideTimeoutId);
+      window.clearTimeout(closeTimeoutId);
     };
+  }, [durationMs, onClose]);
 
-    const typeStyles = {
-      success: { backgroundColor: "#10b981" },
-      error: { backgroundColor: "#ef4444" },
-      info: { backgroundColor: "#3b82f6" },
-    };
-
-    return { ...baseStyles, ...typeStyles[type] };
+  const close = () => {
+    setIsVisible(false);
+    window.setTimeout(onClose, 300);
   };
 
   return (
-    <div
-      style={getStyles()}
-      onClick={() => {
-        setIsVisible(false);
-        setTimeout(onClose, 300);
+    <button
+      type="button"
+      role={type === "error" ? "alert" : "status"}
+      onClick={close}
+      style={{
+        position: "fixed",
+        bottom: 20,
+        right: 20,
+        padding: "12px 16px",
+        border: 0,
+        borderRadius: 8,
+        backgroundColor: backgroundColorByType[type],
+        color: "white",
+        fontSize: 14,
+        fontWeight: 500,
+        zIndex: 1000,
+        transform: isVisible ? "translateX(0)" : "translateX(100%)",
+        opacity: isVisible ? 1 : 0,
+        transition: "transform 0.3s ease, opacity 0.3s ease",
+        cursor: "pointer",
+        boxShadow: "0 4px 12px rgba(0, 0, 0, 0.15)",
       }}
     >
       {message}
-    </div>
+    </button>
   );
-};
-
-export default Notification;
+}

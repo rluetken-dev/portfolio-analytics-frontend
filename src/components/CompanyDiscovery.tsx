@@ -1,7 +1,7 @@
-import React, { useState, useCallback, useEffect } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+
 import { fetchJson } from "../services/api/client";
 
-// search result types
 interface CompanySearchResult {
   id: number;
   symbol: string;
@@ -18,196 +18,223 @@ interface CompanySearchResponse {
   totalFound: number;
 }
 
+interface PopularCompany {
+  id: number;
+  symbol: string;
+}
+
+interface AddPopularResponse {
+  added: PopularCompany[];
+  existing: PopularCompany[];
+  errors: string[];
+}
+
 interface CompanyDiscoveryProps {
   onCompanyAdded?: () => void;
   onNotification?: (message: string, type: "success" | "error" | "info") => void;
   removedSymbol?: string | null;
 }
 
-const CompanyDiscovery = ({
+const popularCategories = [
+  { category: "megacap", label: "Mega-Cap Stocks", color: "#3b82f6" },
+  { category: "tech", label: "Tech Giants", color: "#f43838" },
+  { category: "dow30", label: "Dow 30", color: "#10b981" },
+  { category: "buffett", label: "Buffett Holdings", color: "#f59e0b" },
+  { category: "etf", label: "Popular ETFs", color: "#8b5cf6" },
+] as const;
+
+function getErrorStatus(error: unknown): number | undefined {
+  if (typeof error !== "object" || error === null || !("status" in error)) {
+    return undefined;
+  }
+
+  return typeof error.status === "number" ? error.status : undefined;
+}
+
+export default function CompanyDiscovery({
   onCompanyAdded,
   onNotification,
   removedSymbol,
-}: CompanyDiscoveryProps) => {
+}: CompanyDiscoveryProps) {
   const [showDiscovery, setShowDiscovery] = useState(false);
-
-  // search state
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<CompanySearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [isAdding, setIsAdding] = useState<Record<string, boolean>>({});
+  const [addingCategory, setAddingCategory] = useState<string | null>(null);
+  const searchRequestId = useRef(0);
 
-  // 🧩 React to company removal signal from parent (Companies.tsx)
   useEffect(() => {
-    if (!removedSymbol) return;
+    if (!removedSymbol) {
+      return;
+    }
 
-    setSearchResults((prev: CompanySearchResult[]) =>
-      prev.map((c) =>
-        c.symbol.toUpperCase() === removedSymbol.toUpperCase()
-          ? { ...c, isInUserPortfolio: false }
-          : c,
+    setSearchResults((previous) =>
+      previous.map((company) =>
+        company.symbol.toUpperCase() === removedSymbol.toUpperCase()
+          ? { ...company, isInUserPortfolio: false }
+          : company,
       ),
     );
   }, [removedSymbol]);
 
-  // Bulk add popular companies and link them to the user's portfolio
   const addPopularCompanies = useCallback(
     async (category: string) => {
+      setAddingCategory(category);
+
       try {
-        // 1️⃣ Call backend to add or fetch popular tickers
-        const response = await fetchJson<{
-          added: Array<{ id: number; symbol: string }>;
-          existing: Array<{ id: number; symbol: string }>;
-          errors: string[];
-        }>({
+        const response = await fetchJson<AddPopularResponse>({
           path: "/api/companies/add-popular",
           method: "POST",
           body: { category, limit: 10 },
         });
 
-        // 2️⃣ Merge both newly added and existing tickers
-        const allTickers = [...(response.added || []), ...(response.existing || [])];
+        const companies = [...(response.added ?? []), ...(response.existing ?? [])];
 
-        if (allTickers.length === 0) {
+        if (companies.length === 0) {
           onNotification?.("No companies were added or found.", "info");
           return;
         }
 
-        // 3️⃣ Add each ticker to the current user's portfolio
-        for (const t of allTickers) {
+        let addedCount = 0;
+
+        for (const company of companies) {
           try {
             await fetchJson({
               path: "/api/UserCompany",
               method: "POST",
               body: {
-                tickerId: t.id,
-                symbol: t.symbol,
+                tickerId: company.id,
+                symbol: company.symbol,
                 shares: 0,
                 purchasePrice: 0,
                 notes: "",
               },
             });
-          } catch {
-            console.warn(`Skipping ${t.symbol}: already in portfolio`);
+
+            addedCount += 1;
+          } catch (error) {
+            if (getErrorStatus(error) !== 409) {
+              throw error;
+            }
           }
         }
 
-        // 4️⃣ Notify user and reload portfolio list
-        onNotification?.(`Added ${allTickers.length} companies to your portfolio!`, "success");
+        if (addedCount === 0) {
+          onNotification?.("All selected companies are already in your portfolio.", "info");
+          return;
+        }
+
+        onNotification?.(
+          `${addedCount} ${addedCount === 1 ? "company" : "companies"} added to your portfolio.`,
+          "success",
+        );
         onCompanyAdded?.();
-      } catch (error) {
-        console.error("Failed to add companies:", error);
-        onNotification?.("Failed to add companies", "error");
+      } catch {
+        onNotification?.("Failed to add companies.", "error");
+      } finally {
+        setAddingCategory(null);
       }
     },
     [onCompanyAdded, onNotification],
   );
 
-  // search companies
   const searchCompanies = useCallback(async (query: string) => {
-    if (!query.trim() || query.length < 2) {
+    const normalizedQuery = query.trim();
+    const requestId = ++searchRequestId.current;
+
+    if (normalizedQuery.length < 2) {
       setSearchResults([]);
+      setIsSearching(false);
       return;
     }
 
     setIsSearching(true);
+
     try {
-      // Fetch search results directly from backend (already includes user portfolio info)
       const response = await fetchJson<CompanySearchResponse>({
-        path: `/api/companies/search?q=${encodeURIComponent(query)}&limit=10`,
+        path: `/api/companies/search?q=${encodeURIComponent(normalizedQuery)}&limit=10`,
       });
 
-      // ✅ Just use what the backend gives us — no manual merging needed
-      setSearchResults(response.results || []);
-    } catch (error) {
-      console.error("Search failed:", error);
-      setSearchResults([]);
+      if (requestId === searchRequestId.current) {
+        setSearchResults(response.results ?? []);
+      }
+    } catch {
+      if (requestId === searchRequestId.current) {
+        setSearchResults([]);
+      }
     } finally {
-      setIsSearching(false);
+      if (requestId === searchRequestId.current) {
+        setIsSearching(false);
+      }
     }
   }, []);
 
-  // Adds a company to the user's portfolio (auto-creates global ticker if missing)
   const addSingleCompany = useCallback(
     async (symbol: string) => {
-      setIsAdding((prev) => ({ ...prev, [symbol]: true }));
+      setIsAdding((previous) => ({ ...previous, [symbol]: true }));
 
       try {
-        // 1️⃣ Try to find the ticker in the global list first
-        const tickerResponse = await fetchJson<Array<{ id: number; symbol: string }>>({
+        const tickers = await fetchJson<Array<{ id: number; symbol: string }>>({
           path: `/api/companies?q=${encodeURIComponent(symbol)}`,
-          method: "GET",
         });
 
-        const tickerId = tickerResponse?.[0]?.id ?? null;
-
-        // 2️⃣ Send both tickerId (if known) and symbol — backend handles missing tickers automatically
         await fetchJson({
           path: "/api/UserCompany",
           method: "POST",
           body: {
-            TickerId: tickerId, // capitalized to match backend DTO
-            Symbol: symbol, // capitalized
-            Shares: 0,
-            PurchasePrice: 0,
-            Notes: "",
+            tickerId: tickers[0]?.id ?? null,
+            symbol,
+            shares: 0,
+            purchasePrice: 0,
+            notes: "",
           },
         });
 
-        // ✅ Success notification
-        onNotification?.(`Company ${symbol} added to your portfolio!`, "success");
-
-        // ✅ Immediately update UI: mark this company as 'inPortfolio'
-        setSearchResults((prev) =>
-          prev.map((c) =>
-            c.symbol.toUpperCase() === symbol.toUpperCase() ? { ...c, isInUserPortfolio: true } : c,
+        setSearchResults((previous) =>
+          previous.map((company) =>
+            company.symbol.toUpperCase() === symbol.toUpperCase()
+              ? { ...company, isInUserPortfolio: true }
+              : company,
           ),
         );
 
+        onNotification?.(`Company ${symbol} added to your portfolio.`, "success");
         onCompanyAdded?.();
       } catch (error) {
-        // 3️⃣ Handle typed errors safely
-        console.error("Add failed:", error);
-
-        let message = "Failed to add company.";
-
-        if (error instanceof Error) {
-          const errMsg = error.message.toLowerCase();
-
-          if (errMsg.includes("409")) {
-            message = `Company ${symbol} is already in your portfolio.`;
-          } else if (errMsg.includes("400")) {
-            message = `Invalid symbol: ${symbol}`;
-          } else {
-            message = `Failed to add ${symbol}`;
-          }
-        }
+        const status = getErrorStatus(error);
+        const message =
+          status === 409
+            ? `Company ${symbol} is already in your portfolio.`
+            : status === 400
+              ? `Invalid symbol: ${symbol}.`
+              : `Failed to add ${symbol}.`;
 
         onNotification?.(message, "error");
       } finally {
-        // 4️⃣ Always clear loading state
-        setIsAdding((prev) => ({ ...prev, [symbol]: false }));
+        setIsAdding((previous) => ({ ...previous, [symbol]: false }));
       }
     },
     [onCompanyAdded, onNotification],
   );
 
-  // debounced search effect
-  React.useEffect(() => {
-    const timeoutId = setTimeout(() => {
-      searchCompanies(searchQuery);
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      void searchCompanies(searchQuery);
     }, 300);
 
-    return () => clearTimeout(timeoutId);
+    return () => window.clearTimeout(timeoutId);
   }, [searchQuery, searchCompanies]);
+
+  const trimmedQuery = searchQuery.trim();
 
   return (
     <div
       style={{
         border: "1px solid #e5e7eb",
-        borderRadius: "12px",
-        padding: "16px",
-        marginBottom: "16px",
+        borderRadius: 12,
+        padding: 16,
+        marginBottom: 16,
         backgroundColor: "#fff",
       }}
     >
@@ -216,17 +243,20 @@ const CompanyDiscovery = ({
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
-          marginBottom: "16px",
+          marginBottom: showDiscovery ? 16 : 0,
         }}
       >
-        <h3 style={{ fontSize: "18px", fontWeight: 600, margin: 0 }}>🔍 Discover Companies</h3>
+        <h3 style={{ fontSize: 18, fontWeight: 600, margin: 0 }}>Discover Companies</h3>
+
         <button
-          onClick={() => setShowDiscovery(!showDiscovery)}
+          type="button"
+          onClick={() => setShowDiscovery((visible) => !visible)}
+          aria-expanded={showDiscovery}
           style={{
             padding: "8px 16px",
             backgroundColor: "#f3f4f6",
             border: "1px solid #d1d5db",
-            borderRadius: "8px",
+            borderRadius: 8,
             cursor: "pointer",
           }}
         >
@@ -237,176 +267,155 @@ const CompanyDiscovery = ({
       {showDiscovery && (
         <div>
           <p>Quick Add Popular Companies:</p>
-          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginBottom: "16px" }}>
-            <button
-              onClick={() => addPopularCompanies("megacap")}
-              style={{
-                padding: "8px 12px",
-                backgroundColor: "#3b82f6",
-                color: "white",
-                border: "none",
-                borderRadius: "6px",
-                cursor: "pointer",
-                fontSize: "12px",
-              }}
-            >
-              Mega-Cap Stocks
-            </button>
-            <button
-              onClick={() => addPopularCompanies("tech")}
-              style={{
-                padding: "8px 12px",
-                backgroundColor: "#f43838ff",
-                color: "white",
-                border: "none",
-                borderRadius: "6px",
-                cursor: "pointer",
-                fontSize: "12px",
-              }}
-            >
-              Tech Giants
-            </button>
-            <button
-              onClick={() => addPopularCompanies("dow30")}
-              style={{
-                padding: "8px 12px",
-                backgroundColor: "#10b981",
-                color: "white",
-                border: "none",
-                borderRadius: "6px",
-                cursor: "pointer",
-                fontSize: "12px",
-              }}
-            >
-              Dow 30
-            </button>
-            <button
-              onClick={() => addPopularCompanies("buffett")}
-              style={{
-                padding: "8px 12px",
-                backgroundColor: "#f59e0b",
-                color: "white",
-                border: "none",
-                borderRadius: "6px",
-                cursor: "pointer",
-                fontSize: "12px",
-              }}
-            >
-              Buffett Holdings
-            </button>
-            <button
-              onClick={() => addPopularCompanies("etf")}
-              style={{
-                padding: "8px 12px",
-                backgroundColor: "#8b5cf6",
-                color: "white",
-                border: "none",
-                borderRadius: "6px",
-                cursor: "pointer",
-                fontSize: "12px",
-              }}
-            >
-              Popular ETFs
-            </button>
+
+          <div
+            style={{
+              display: "flex",
+              gap: 8,
+              flexWrap: "wrap",
+              marginBottom: 16,
+            }}
+          >
+            {popularCategories.map(({ category, label, color }) => {
+              const isCurrentCategory = addingCategory === category;
+
+              return (
+                <button
+                  key={category}
+                  type="button"
+                  onClick={() => void addPopularCompanies(category)}
+                  disabled={addingCategory !== null}
+                  style={{
+                    padding: "8px 12px",
+                    backgroundColor: color,
+                    color: "white",
+                    border: "none",
+                    borderRadius: 6,
+                    cursor: addingCategory === null ? "pointer" : "not-allowed",
+                    fontSize: 12,
+                    opacity: addingCategory !== null && !isCurrentCategory ? 0.6 : 1,
+                  }}
+                >
+                  {isCurrentCategory ? "Adding..." : label}
+                </button>
+              );
+            })}
           </div>
 
-          {/* Search Section */}
-          <div style={{ marginTop: "20px" }}>
-            <p>Or search for specific companies:</p>
+          <div style={{ marginTop: 20 }}>
+            <label htmlFor="company-search">Or search for specific companies:</label>
+
             <input
-              type="text"
-              placeholder="Search by company name or ticker (e.g., Apple, AAPL)..."
+              id="company-search"
+              type="search"
+              placeholder="Search by company name or ticker, for example Apple or AAPL"
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              autoComplete="off"
               style={{
                 width: "100%",
-                padding: "12px",
+                padding: 12,
                 border: "1px solid #d1d5db",
-                borderRadius: "8px",
-                fontSize: "14px",
-                marginBottom: "12px",
+                borderRadius: 8,
+                fontSize: 14,
+                marginTop: 12,
+                marginBottom: 12,
+                boxSizing: "border-box",
               }}
             />
 
-            {/* Search Results */}
-            {searchQuery.length >= 2 && (
+            {trimmedQuery.length >= 2 && (
               <div
                 style={{
                   border: "1px solid #e5e7eb",
-                  borderRadius: "8px",
-                  maxHeight: "200px",
+                  borderRadius: 8,
+                  maxHeight: 200,
                   overflowY: "auto",
                 }}
               >
                 {isSearching ? (
-                  <div style={{ padding: "20px", textAlign: "center", color: "#6b7280" }}>
+                  <div style={{ padding: 20, textAlign: "center", color: "#6b7280" }}>
                     Searching...
                   </div>
                 ) : searchResults.length === 0 ? (
-                  <div style={{ padding: "20px", textAlign: "center", color: "#6b7280" }}>
-                    No companies found for "{searchQuery}"
+                  <div style={{ padding: 20, textAlign: "center", color: "#6b7280" }}>
+                    No companies found for &quot;{trimmedQuery}&quot;
                   </div>
                 ) : (
                   searchResults.map((result) => (
                     <div
-                      key={result.symbol}
+                      key={result.id || result.symbol}
                       style={{
                         display: "flex",
                         justifyContent: "space-between",
                         alignItems: "center",
-                        padding: "12px",
+                        gap: 12,
+                        padding: 12,
                         borderBottom: "1px solid #f1f5f9",
                       }}
                     >
                       <div style={{ flex: 1 }}>
-                        <div style={{ fontWeight: 600, fontSize: "14px", fontFamily: "monospace" }}>
+                        <div
+                          style={{
+                            fontWeight: 600,
+                            fontSize: 14,
+                            fontFamily: "monospace",
+                          }}
+                        >
                           {result.symbol}
                         </div>
-                        <div style={{ fontSize: "12px", color: "#6b7280" }}>
-                          {result.name} {result.sector && `• ${result.sector}`}
+
+                        <div style={{ fontSize: 12, color: "#6b7280" }}>
+                          {result.name}
+                          {result.sector && ` - ${result.sector}`}
                         </div>
                       </div>
-                      <div>
-                        {result.isInUserPortfolio ? (
-                          <span
-                            style={{
-                              padding: "4px 8px",
-                              backgroundColor: "#f3f4f6",
-                              color: "#6b7280",
-                              border: "1px solid #d1d5db",
-                              borderRadius: "4px",
-                              fontSize: "12px",
-                            }}
-                          >
-                            ✓ In Portfolio
-                          </span>
-                        ) : (
-                          <button
-                            onClick={() => addSingleCompany(result.symbol)}
-                            disabled={isAdding[result.symbol]}
-                            style={{
-                              padding: "6px 12px",
-                              backgroundColor: isAdding[result.symbol] ? "#94a3b8" : "#10b981",
-                              color: "white",
-                              border: "none",
-                              borderRadius: "4px",
-                              cursor: isAdding[result.symbol] ? "not-allowed" : "pointer",
-                              fontSize: "12px",
-                            }}
-                          >
-                            {isAdding[result.symbol] ? "Adding..." : "+ Add"}
-                          </button>
-                        )}
-                      </div>
+
+                      {result.isInUserPortfolio ? (
+                        <span
+                          style={{
+                            padding: "4px 8px",
+                            backgroundColor: "#f3f4f6",
+                            color: "#6b7280",
+                            border: "1px solid #d1d5db",
+                            borderRadius: 4,
+                            fontSize: 12,
+                          }}
+                        >
+                          In Portfolio
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => void addSingleCompany(result.symbol)}
+                          disabled={Boolean(isAdding[result.symbol])}
+                          style={{
+                            padding: "6px 12px",
+                            backgroundColor: isAdding[result.symbol] ? "#94a3b8" : "#10b981",
+                            color: "white",
+                            border: "none",
+                            borderRadius: 4,
+                            cursor: isAdding[result.symbol] ? "not-allowed" : "pointer",
+                            fontSize: 12,
+                          }}
+                        >
+                          {isAdding[result.symbol] ? "Adding..." : "+ Add"}
+                        </button>
+                      )}
                     </div>
                   ))
                 )}
               </div>
             )}
 
-            {searchQuery.length > 0 && searchQuery.length < 2 && (
+            {trimmedQuery.length > 0 && trimmedQuery.length < 2 && (
               <div
-                style={{ padding: "12px", textAlign: "center", color: "#6b7280", fontSize: "14px" }}
+                style={{
+                  padding: 12,
+                  textAlign: "center",
+                  color: "#6b7280",
+                  fontSize: 14,
+                }}
               >
                 Type at least 2 characters to search
               </div>
@@ -416,6 +425,4 @@ const CompanyDiscovery = ({
       )}
     </div>
   );
-};
-
-export default CompanyDiscovery;
+}

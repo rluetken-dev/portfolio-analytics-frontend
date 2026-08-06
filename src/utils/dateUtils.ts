@@ -1,19 +1,28 @@
-// English: read DB-latest date for anchoring the 180d window
-export async function fetchLatestDateISO(baseUrl: string, symbol: string): Promise<string | null> {
-  const qs = new URLSearchParams({ symbol });
-  const resp = await fetch(`${baseUrl}/api/Quotes/latest?${qs.toString()}`, {
+export async function fetchLatestDateISO(symbol: string): Promise<string | null> {
+  const normalizedSymbol = symbol.trim().toUpperCase();
+
+  if (!normalizedSymbol) {
+    return null;
+  }
+
+  const params = new URLSearchParams({ symbol: normalizedSymbol });
+
+  const response = await fetch(`/api/Quotes/latest?${params.toString()}`, {
     headers: { Accept: "application/json" },
   });
-  if (!resp.ok) return null;
 
-  const raw: unknown = await resp.json();
-  if (typeof raw === "object" && raw !== null) {
-    const o = raw as Record<string, unknown>;
-    const d = o["date"] ?? o["Date"] ?? o["tradingDate"] ?? o["TradingDate"] ?? o["asOf"] ?? null;
-
-    if (typeof d === "string" && d.length >= 10) {
-      return d.slice(0, 10);
-    }
+  if (!response.ok) {
+    return null;
   }
-  return null;
+
+  const data = (await response.json()) as unknown;
+
+  if (typeof data !== "object" || data === null) {
+    return null;
+  }
+
+  const row = data as Record<string, unknown>;
+  const date = row.date ?? row.Date ?? row.tradingDate ?? row.TradingDate ?? row.asOf;
+
+  return typeof date === "string" && date.length >= 10 ? date.slice(0, 10) : null;
 }

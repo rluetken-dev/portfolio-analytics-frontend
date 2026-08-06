@@ -1,106 +1,119 @@
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import type { User } from "../types/auth";
-import { AuthContext } from "./auth-context";
-import { login as apiLogin, fetchMe, refresh, logout as apiLogout } from "../services/api/auth";
-import { setAccessToken, clearAccessToken, getAccessToken } from "../utils/token";
 import { useNavigate } from "react-router-dom";
 
-// AuthProvider: wraps the app and provides auth state + actions
-export function AuthProvider({ children }: { children: ReactNode }) {
+import { fetchMe, login as apiLogin, logout as apiLogout, refresh } from "../services/api/auth";
+import type { User } from "../types/auth";
+import { clearAccessToken, getAccessToken, setAccessToken } from "../utils/token";
+import { AuthContext } from "./auth-context";
+
+interface AuthProviderProps {
+  children: ReactNode;
+}
+
+type BalanceResponse = {
+  cashBalance?: number;
+};
+
+export function AuthProvider({ children }: AuthProviderProps) {
   const [user, setUser] = useState<User | null>(null);
   const [balance, setBalance] = useState<number | null>(null);
   const navigate = useNavigate();
 
-  // ✅ Helper to fetch user balance
-  async function fetchBalanceAndSet() {
-    try {
-      const token = getAccessToken();
-      if (!token) return;
+  const fetchBalance = useCallback(async () => {
+    const token = getAccessToken();
 
-      const res = await fetch("/api/User/balance", {
-        method: "GET",
-        credentials: "include",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      setBalance(data.cashBalance);
-      console.log("💰 Balance loaded:", data.cashBalance);
-    } catch (err) {
-      console.warn("⚠️ Failed to fetch balance:", err);
-    }
-  }
-
-  useEffect(() => {
-    async function initAuth() {
-      try {
-        // Try to fetch user with current access token
-        const me = await fetchMe();
-        setUser(me);
-        console.log("Restored session for:", me.username);
-
-        await fetchBalanceAndSet(); // ✅ load balance on startup
-      } catch {
-        console.log("Access token invalid, trying refresh...");
-
-        try {
-          const newTokens = await refresh();
-          setAccessToken(newTokens.accessToken);
-
-          const me = await fetchMe();
-          setUser(me);
-          console.log("Session restored via refresh for:", me.username);
-
-          await fetchBalanceAndSet(); // ✅ also load balance after refresh
-        } catch {
-          console.log("No active session available");
-          setUser(null);
-        }
-      }
+    if (!token) {
+      setBalance(null);
+      return;
     }
 
-    void initAuth();
+    const response = await fetch("/api/User/balance", {
+      method: "GET",
+      credentials: "include",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const data = (await response.json()) as BalanceResponse;
+    setBalance(typeof data.cashBalance === "number" ? data.cashBalance : null);
   }, []);
 
-  // login wrapper
-  async function login(username: string, password: string) {
-    try {
+  useEffect(() => {
+    let isMounted = true;
+
+    const initializeAuth = async () => {
+      try {
+        const currentUser = await fetchMe();
+
+        if (!isMounted) {
+          return;
+        }
+
+        setUser(currentUser);
+        await fetchBalance();
+      } catch {
+        try {
+          const tokens = await refresh();
+          setAccessToken(tokens.accessToken);
+
+          const currentUser = await fetchMe();
+
+          if (!isMounted) {
+            return;
+          }
+
+          setUser(currentUser);
+          await fetchBalance();
+        } catch {
+          if (!isMounted) {
+            return;
+          }
+
+          clearAccessToken();
+          setUser(null);
+          setBalance(null);
+        }
+      }
+    };
+
+    void initializeAuth();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [fetchBalance]);
+
+  const login = useCallback(
+    async (username: string, password: string) => {
       const response = await apiLogin({ username, password });
-      console.log("AuthProvider.login() response:", response);
 
       setAccessToken(response.accessToken);
       setUser(response.user);
-      console.log("AuthProvider state updated:", response.user);
+      await fetchBalance();
+    },
+    [fetchBalance],
+  );
 
-      await fetchBalanceAndSet(); // ✅ load balance after login
-    } catch (err) {
-      console.error("Login failed:", err);
-      throw err;
-    }
-  }
-
-  // logout wrapper with redirect
-  async function logout() {
+  const logout = useCallback(async () => {
     try {
-      await apiLogout(); // call backend logout
-    } catch (err) {
-      console.warn("Logout request failed:", err);
+      await apiLogout();
     } finally {
       clearAccessToken();
       setUser(null);
       setBalance(null);
-      console.log("User logged out");
       navigate("/login");
     }
-  }
+  }, [navigate]);
 
   return (
     <AuthContext.Provider
       value={{
         user,
-        isAuthenticated: !!user,
+        isAuthenticated: user !== null,
         login,
         logout,
         balance,

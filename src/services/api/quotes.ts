@@ -1,4 +1,3 @@
-// src/services/api/quotes.ts
 import type { LatestMetricWithStatus } from "../../types/analytics";
 
 type QuoteRow = {
@@ -8,87 +7,11 @@ type QuoteRow = {
   source?: string;
 };
 
-export async function getLatestCloseFromQuotes(symbol: string): Promise<LatestMetricWithStatus> {
-  const sym = (symbol ?? "").trim().toUpperCase();
-  if (!sym) {
-    return {
-      symbol: sym,
-      value: null,
-      unit: "USD",
-      status: 400,
-      error: "Symbol required",
-      retryAfterSec: undefined,
-    };
-  }
+type ApiErrorResponse = {
+  detail?: string;
+  message?: string;
+};
 
-  try {
-    const url = `/api/quotes/latest?symbol=${encodeURIComponent(sym)}&take=1`;
-    const resp = await fetch(url, { method: "GET", headers: { Accept: "application/json" } });
-
-    if (!resp.ok) {
-      // Special handling for 429
-      if (resp.status === 429) {
-        const err = await resp.json();
-        const retryAfterHeader = resp.headers.get("Retry-After");
-        const retryAfterSec = retryAfterHeader ? parseInt(retryAfterHeader, 10) : undefined;
-
-        return {
-          symbol: sym,
-          value: null,
-          unit: "USD",
-          status: 429,
-          error: err.detail || "Rate limit reached – please try again later",
-          retryAfterSec,
-        };
-      }
-
-      // Generic error case
-      return {
-        symbol: sym,
-        value: null,
-        unit: "USD",
-        status: resp.status,
-        retryAfterSec: undefined,
-      };
-    }
-
-    const rows = (await resp.json()) as QuoteRow[];
-    if (!Array.isArray(rows) || rows.length === 0) {
-      return { symbol: sym, value: null, unit: "USD", status: 404, retryAfterSec: undefined };
-    }
-
-    const r = rows[0];
-    const hasAdj = typeof r.adjustedClose === "number";
-    const val: number | null = hasAdj
-      ? r.adjustedClose!
-      : typeof r.close === "number"
-        ? r.close!
-        : null;
-
-    return {
-      symbol: sym,
-      value: val,
-      asOf: r.date,
-      adjusted: hasAdj,
-      source: r.source,
-      unit: "USD",
-      status: 200,
-      retryAfterSec: undefined, // success has no retry hint
-    };
-  } catch (err) {
-    console.error("[quotes] getLatestCloseFromQuotes failed:", err);
-    return {
-      symbol: sym,
-      value: null,
-      unit: "USD",
-      status: 500,
-      error: String(err),
-      retryAfterSec: undefined,
-    };
-  }
-}
-
-// English: fetch & persist recent quotes for one or more symbols, then return stats
 type RefreshResponse = {
   ok: boolean;
   symbols: string[];
@@ -96,27 +19,6 @@ type RefreshResponse = {
   skipped: number;
 };
 
-export async function refreshQuotes(symbols: string, range = "24m"): Promise<RefreshResponse> {
-  const list = (symbols ?? "").trim();
-  if (!list) throw new Error("No symbols");
-
-  const url = `/api/quotes/refresh?symbols=${encodeURIComponent(
-    list,
-  )}&range=${encodeURIComponent(range)}`;
-
-  const resp = await fetch(url, {
-    method: "POST",
-    headers: { Accept: "application/json" },
-  });
-
-  if (!resp.ok) {
-    throw new Error(`HTTP ${resp.status}`);
-  }
-
-  return (await resp.json()) as RefreshResponse;
-}
-
-// English: fetch the most recent live price (does NOT persist to DB)
 export type CurrentQuote = {
   symbol: string;
   price: number | null;
@@ -126,48 +28,174 @@ export type CurrentQuote = {
   retryAfterSec?: number;
 };
 
-export async function getCurrentPrice(symbol: string): Promise<CurrentQuote> {
-  const sym = (symbol ?? "").trim().toUpperCase();
-  if (!sym) return { symbol: sym, price: null, status: 400, error: "Symbol required" };
+function normalizeSymbol(symbol: string) {
+  return symbol.trim().toUpperCase();
+}
+
+function parseRetryAfter(response: Response) {
+  const retryAfter = response.headers.get("Retry-After");
+
+  if (!retryAfter) {
+    return undefined;
+  }
+
+  const seconds = Number.parseInt(retryAfter, 10);
+  return Number.isFinite(seconds) ? seconds : undefined;
+}
+
+async function readApiError(response: Response) {
+  try {
+    const data = (await response.json()) as ApiErrorResponse;
+    return data.detail ?? data.message;
+  } catch {
+    return undefined;
+  }
+}
+
+export async function getLatestCloseFromQuotes(symbol: string): Promise<LatestMetricWithStatus> {
+  const normalizedSymbol = normalizeSymbol(symbol);
+
+  if (!normalizedSymbol) {
+    return {
+      symbol: normalizedSymbol,
+      value: null,
+      unit: "USD",
+      status: 400,
+      error: "Symbol required.",
+    };
+  }
 
   try {
-    const url = `/api/quotes/current?symbol=${encodeURIComponent(sym)}`;
-    const resp = await fetch(url, { headers: { Accept: "application/json" } });
+    const response = await fetch(
+      `/api/quotes/latest?symbol=${encodeURIComponent(normalizedSymbol)}&take=1`,
+      {
+        method: "GET",
+        headers: { Accept: "application/json" },
+      },
+    );
 
-    if (!resp.ok) {
-      let errDetail: string | undefined;
-      try {
-        const errBody = await resp.json();
-        errDetail = errBody.detail;
-      } catch {
-        /* ignore parse error */
-      }
-
-      const retryAfterHeader = resp.headers.get("Retry-After");
-      const retryAfterSec = retryAfterHeader ? parseInt(retryAfterHeader, 10) : undefined;
-
+    if (!response.ok) {
       return {
-        symbol: sym,
-        price: null,
-        status: resp.status,
-        error: errDetail || `HTTP ${resp.status} error`,
-        retryAfterSec,
+        symbol: normalizedSymbol,
+        value: null,
+        unit: "USD",
+        status: response.status,
+        error:
+          response.status === 429
+            ? (await readApiError(response)) ?? "Rate limit reached. Please try again later."
+            : await readApiError(response),
+        retryAfterSec: parseRetryAfter(response),
       };
     }
 
-    const data = (await resp.json()) as {
+    const rows = (await response.json()) as QuoteRow[];
+
+    if (!Array.isArray(rows) || rows.length === 0) {
+      return {
+        symbol: normalizedSymbol,
+        value: null,
+        unit: "USD",
+        status: 404,
+      };
+    }
+
+    const latestQuote = rows[0];
+    const adjustedClose =
+      typeof latestQuote.adjustedClose === "number" ? latestQuote.adjustedClose : null;
+    const close = typeof latestQuote.close === "number" ? latestQuote.close : null;
+    const value: number | null = adjustedClose ?? close;
+    const hasAdjustedClose = adjustedClose !== null;
+    
+    return {
+      symbol: normalizedSymbol,
+      value,
+      asOf: latestQuote.date,
+      adjusted: hasAdjustedClose,
+      source: latestQuote.source,
+      unit: "USD",
+      status: 200,
+    };
+  } catch (error) {
+    return {
+      symbol: normalizedSymbol,
+      value: null,
+      unit: "USD",
+      status: 500,
+      error: error instanceof Error ? error.message : "Failed to load latest quote.",
+    };
+  }
+}
+
+export async function refreshQuotes(symbols: string, range = "24m"): Promise<RefreshResponse> {
+  const normalizedSymbols = symbols.trim();
+
+  if (!normalizedSymbols) {
+    throw new Error("Symbols are required.");
+  }
+
+  const response = await fetch(
+    `/api/quotes/refresh?symbols=${encodeURIComponent(normalizedSymbols)}&range=${encodeURIComponent(
+      range,
+    )}`,
+    {
+      method: "POST",
+      headers: { Accept: "application/json" },
+    },
+  );
+
+  if (!response.ok) {
+    const message = await readApiError(response);
+    throw new Error(message ?? `HTTP ${response.status}`);
+  }
+
+  return (await response.json()) as RefreshResponse;
+}
+
+export async function getCurrentPrice(symbol: string): Promise<CurrentQuote> {
+  const normalizedSymbol = normalizeSymbol(symbol);
+
+  if (!normalizedSymbol) {
+    return {
+      symbol: normalizedSymbol,
+      price: null,
+      status: 400,
+      error: "Symbol required.",
+    };
+  }
+
+  try {
+    const response = await fetch(`/api/quotes/current?symbol=${encodeURIComponent(normalizedSymbol)}`, {
+      headers: { Accept: "application/json" },
+    });
+
+    if (!response.ok) {
+      return {
+        symbol: normalizedSymbol,
+        price: null,
+        status: response.status,
+        error: (await readApiError(response)) ?? `HTTP ${response.status}`,
+        retryAfterSec: parseRetryAfter(response),
+      };
+    }
+
+    const data = (await response.json()) as {
       symbol?: string;
       price?: number;
       latestTradingDay?: string;
     };
 
     return {
-      symbol: data.symbol ?? sym,
+      symbol: data.symbol ?? normalizedSymbol,
       price: typeof data.price === "number" ? data.price : null,
       latestTradingDay: data.latestTradingDay,
       status: 200,
     };
-  } catch (e) {
-    return { symbol: sym, price: null, status: 500, error: String(e) };
+  } catch (error) {
+    return {
+      symbol: normalizedSymbol,
+      price: null,
+      status: 500,
+      error: error instanceof Error ? error.message : "Failed to load current quote.",
+    };
   }
 }

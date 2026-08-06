@@ -1,3 +1,7 @@
-dist
 node_modules
-
+dist
+dist-ssr
+.tsbuildinfo
+coverage
+*.log
+.env*

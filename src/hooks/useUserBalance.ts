@@ -1,4 +1,5 @@
-import { useContext, useCallback, useState } from "react";
+import { useCallback, useContext, useState } from "react";
+
 import { AuthContext } from "../context/auth-context";
 import { getAccessToken } from "../utils/token";
 
@@ -7,50 +8,71 @@ interface UserBalanceResponse {
   cashBalance: number;
 }
 
+type ApiErrorResponse = {
+  message?: string;
+};
+
 export function useUserBalance() {
   const context = useContext(AuthContext);
+
   if (!context) {
-    throw new Error("useUserBalance must be used within an AuthProvider");
+    throw new Error("useUserBalance must be used within an AuthProvider.");
   }
 
   const { balance, setBalance, isAuthenticated } = context;
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // ✅ Fetch balance from backend and update global state
   const refreshBalance = useCallback(async () => {
-    if (!isAuthenticated) return;
+    if (!isAuthenticated) {
+      setBalance(null);
+      return;
+    }
+
     const token = getAccessToken();
-    if (!token) return;
+
+    if (!token) {
+      setBalance(null);
+      return;
+    }
 
     setLoading(true);
+
     try {
-      const res = await fetch("/api/User/balance", {
+      const response = await fetch("/api/User/balance", {
         method: "GET",
         credentials: "include",
         headers: { Authorization: `Bearer ${token}` },
       });
 
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data: UserBalanceResponse = await res.json();
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const data = (await response.json()) as UserBalanceResponse;
+
       setBalance(data.cashBalance);
       setError(null);
-    } catch (err) {
-      console.error("❌ Error fetching balance:", err);
-      setError("Failed to load balance");
+    } catch {
+      setError("Failed to load balance.");
     } finally {
       setLoading(false);
     }
   }, [isAuthenticated, setBalance]);
 
-  // ✅ Deposit
   const deposit = useCallback(
     async (amount: number) => {
-      if (amount <= 0) throw new Error("Amount must be positive.");
-      const token = getAccessToken();
-      if (!token) return;
+      if (amount <= 0) {
+        throw new Error("Amount must be positive.");
+      }
 
-      const res = await fetch("/api/User/deposit", {
+      const token = getAccessToken();
+
+      if (!token) {
+        throw new Error("Missing access token.");
+      }
+
+      const response = await fetch("/api/User/deposit", {
         method: "POST",
         credentials: "include",
         headers: {
@@ -60,21 +82,28 @@ export function useUserBalance() {
         body: JSON.stringify(amount),
       });
 
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
 
-      await refreshBalance(); // 🔄 sync global balance after deposit
+      await refreshBalance();
     },
     [refreshBalance],
   );
 
-  // ✅ Withdraw
   const withdraw = useCallback(
     async (amount: number) => {
-      if (amount <= 0) throw new Error("Amount must be positive.");
-      const token = getAccessToken();
-      if (!token) return;
+      if (amount <= 0) {
+        throw new Error("Amount must be positive.");
+      }
 
-      const res = await fetch("/api/User/withdraw", {
+      const token = getAccessToken();
+
+      if (!token) {
+        throw new Error("Missing access token.");
+      }
+
+      const response = await fetch("/api/User/withdraw", {
         method: "POST",
         credentials: "include",
         headers: {
@@ -84,20 +113,22 @@ export function useUserBalance() {
         body: JSON.stringify(amount),
       });
 
-      if (res.status === 400) {
-        const err = await res.json();
-        throw new Error(err.message || "Insufficient funds");
+      if (response.status === 400) {
+        const data = (await response.json()) as ApiErrorResponse;
+        throw new Error(data.message || "Insufficient funds.");
       }
 
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
 
-      await refreshBalance(); // 🔄 sync global balance after withdraw
+      await refreshBalance();
     },
     [refreshBalance],
   );
 
   return {
-    cashBalance: balance, // ✅ expose global balance (renamed for clarity)
+    cashBalance: balance,
     loading,
     error,
     deposit,

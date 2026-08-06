@@ -1,124 +1,161 @@
-// src/components/company/analytics/SolvencySection.tsx
-import * as React from "react";
-import { SectionHeader, SectionGrid, MetricCard } from "./ui";
+import { useEffect, useMemo, useState } from "react";
 
-/** ---------- Helpers ---------- */
-// English: tolerant numeric fetcher from /api/analytics/*
+import { MetricCard, SectionGrid, SectionHeader } from "./ui";
+
+type MetricResult = {
+  value: number | null;
+  status: number;
+};
+
+interface SolvencySectionProps {
+  symbol: string;
+  showDebtToEquity?: boolean;
+}
+
+const emptyValue = "—";
+
 async function fetchMetricNumber(
-  baseUrl: string,
   path: string,
   symbol: string,
   keys: string[],
-): Promise<{ value: number | null; status: number }> {
-  const resp = await fetch(`${baseUrl}${path}?symbol=${encodeURIComponent(symbol)}`, {
+): Promise<MetricResult> {
+  const response = await fetch(`${path}?symbol=${encodeURIComponent(symbol)}`, {
     headers: { Accept: "application/json" },
   });
-  if (!resp.ok) return { value: null, status: resp.status };
 
-  const raw = await resp.json();
-  if (typeof raw === "number") return { value: raw, status: resp.status };
-
-  if (raw && typeof raw === "object") {
-    const o = raw as Record<string, unknown>;
-    for (const k of keys)
-      if (typeof o[k] === "number") return { value: o[k] as number, status: resp.status };
+  if (!response.ok) {
+    return { value: null, status: response.status };
   }
-  return { value: null, status: resp.status };
+
+  const data = (await response.json()) as unknown;
+
+  if (typeof data === "number" && Number.isFinite(data)) {
+    return { value: data, status: response.status };
+  }
+
+  if (typeof data !== "object" || data === null) {
+    return { value: null, status: response.status };
+  }
+
+  const row = data as Record<string, unknown>;
+
+  for (const key of keys) {
+    if (typeof row[key] === "number" && Number.isFinite(row[key])) {
+      return { value: row[key], status: response.status };
+    }
+  }
+
+  return { value: null, status: response.status };
 }
 
-// English: formatters
-const fmtPercent = (v: number | null | undefined) =>
-  v == null || !Number.isFinite(v) ? "—" : `${(v * 100).toFixed(1)}%`;
+function formatPercent(value: number | null | undefined) {
+  return value == null || !Number.isFinite(value) ? emptyValue : `${(value * 100).toFixed(1)}%`;
+}
 
-const fmtRatio = (v: number | null | undefined) =>
-  v == null || !Number.isFinite(v) ? "—" : `${v.toFixed(2)}x`;
+function formatRatio(value: number | null | undefined) {
+  return value == null || !Number.isFinite(value) ? emptyValue : `${value.toFixed(2)}x`;
+}
 
-/** ---------- Component ---------- */
+function isValidMetric(value: number | null): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
 export default function SolvencySection({
   symbol,
-  showDebtToEquity = false, // English: avoid duplicate with Key Metrics by default
-}: {
-  symbol: string;
-  showDebtToEquity?: boolean;
-}) {
-  const sym = (symbol ?? "").trim().toUpperCase();
-  const backendBase = "";
+  showDebtToEquity = false,
+}: SolvencySectionProps) {
+  const normalizedSymbol = symbol.trim().toUpperCase();
 
-  // English: display strings
-  const [dte, setDte] = React.useState("—");
-  const [dta, setDta] = React.useState("—");
-  const [eqr, setEqr] = React.useState("—");
+  const [debtToEquity, setDebtToEquity] = useState(emptyValue);
+  const [debtToAssets, setDebtToAssets] = useState(emptyValue);
+  const [equityRatio, setEquityRatio] = useState(emptyValue);
+  const [loadedCount, setLoadedCount] = useState(0);
 
-  // English: availability counter reflects only visible metrics
-  const [count, setCount] = React.useState("0/0");
+  const totalVisibleMetrics = useMemo(
+    () => (showDebtToEquity ? 1 : 0) + 1 + 1,
+    [showDebtToEquity],
+  );
 
-  React.useEffect(() => {
-    let cancelled = false;
+  useEffect(() => {
+    let isMounted = true;
 
-    async function run() {
-      // English: reset placeholders and counter
-      setDte("—");
-      setDta("—");
-      setEqr("—");
-      setCount("0/0");
+    const loadMetrics = async () => {
+      setDebtToEquity(emptyValue);
+      setDebtToAssets(emptyValue);
+      setEquityRatio(emptyValue);
+      setLoadedCount(0);
 
-      if (!sym) return;
+      if (!normalizedSymbol) {
+        return;
+      }
 
       try {
-        const [dteR, dtaR, eqrR] = await Promise.all([
-          fetchMetricNumber(backendBase, "/api/analytics/debt-to-equity", sym, [
+        const [debtToEquityResult, debtToAssetsResult, equityRatioResult] = await Promise.all([
+          fetchMetricNumber("/api/analytics/debt-to-equity", normalizedSymbol, [
             "value",
             "debtToEquity",
           ]),
-          fetchMetricNumber(backendBase, "/api/analytics/debt-to-assets", sym, [
+          fetchMetricNumber("/api/analytics/debt-to-assets", normalizedSymbol, [
             "value",
             "debtToAssets",
           ]),
-          fetchMetricNumber(backendBase, "/api/analytics/equity-ratio", sym, [
+          fetchMetricNumber("/api/analytics/equity-ratio", normalizedSymbol, [
             "value",
             "equityRatio",
           ]),
         ]);
-        if (cancelled) return;
 
-        const dteOk = Number.isFinite(dteR.value as number);
-        const dtaOk = Number.isFinite(dtaR.value as number);
-        const eqrOk = Number.isFinite(eqrR.value as number);
+        if (!isMounted) {
+          return;
+        }
 
-        if (dteOk) setDte(fmtRatio(dteR.value!));
-        if (dtaOk) setDta(fmtPercent(dtaR.value!));
-        if (eqrOk) setEqr(fmtPercent(eqrR.value!));
+        const hasDebtToEquity = isValidMetric(debtToEquityResult.value);
+        const hasDebtToAssets = isValidMetric(debtToAssetsResult.value);
+        const hasEquityRatio = isValidMetric(equityRatioResult.value);
 
-        // English: visible metrics only (D/E is toggle)
-        const totalVisible = (showDebtToEquity ? 1 : 0) + 1 + 1; // D/E?, D/A, Eq Ratio
-        const available = (showDebtToEquity && dteOk ? 1 : 0) + (dtaOk ? 1 : 0) + (eqrOk ? 1 : 0);
+        if (hasDebtToEquity) {
+          setDebtToEquity(formatRatio(debtToEquityResult.value));
+        }
 
-        setCount(`${available}/${totalVisible}`);
+        if (hasDebtToAssets) {
+          setDebtToAssets(formatPercent(debtToAssetsResult.value));
+        }
+
+        if (hasEquityRatio) {
+          setEquityRatio(formatPercent(equityRatioResult.value));
+        }
+
+        const nextLoadedCount =
+          (showDebtToEquity && hasDebtToEquity ? 1 : 0) +
+          (hasDebtToAssets ? 1 : 0) +
+          (hasEquityRatio ? 1 : 0);
+
+        setLoadedCount(nextLoadedCount);
       } catch {
-        // English: show 0 over visible total on error
-        const totalVisible = (showDebtToEquity ? 1 : 0) + 1 + 1;
-        setCount(`0/${totalVisible}`);
+        if (isMounted) {
+          setLoadedCount(0);
+        }
       }
-    }
-
-    run();
-    return () => {
-      cancelled = true; // English: avoid setState after unmount
     };
-  }, [sym, backendBase, showDebtToEquity]);
 
-  if (!sym) return null;
+    void loadMetrics();
 
-  // English: columns based on what is visible
-  const cols = (showDebtToEquity ? 1 : 0) + 1 + 1;
+    return () => {
+      isMounted = false;
+    };
+  }, [normalizedSymbol, showDebtToEquity]);
+
+  if (!normalizedSymbol) {
+    return null;
+  }
 
   return (
     <div>
-      <SectionHeader title="Solvency / Leverage" count={count} />
-      <SectionGrid cols={cols}>
-        {showDebtToEquity && <MetricCard label="Debt/Equity" value={dte} />}
-        <MetricCard label="Debt/Assets" value={dta} />
-        <MetricCard label="Equity Ratio" value={eqr} />
+      <SectionHeader title="Solvency / Leverage" count={`${loadedCount}/${totalVisibleMetrics}`} />
+      <SectionGrid cols={totalVisibleMetrics}>
+        {showDebtToEquity && <MetricCard label="Debt/Equity" value={debtToEquity} />}
+        <MetricCard label="Debt/Assets" value={debtToAssets} />
+        <MetricCard label="Equity Ratio" value={equityRatio} />
       </SectionGrid>
     </div>
   );

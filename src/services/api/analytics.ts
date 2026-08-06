@@ -1,103 +1,149 @@
-import { fetchJson } from "./client";
 import type {
   LatestMetric,
   PriceApiResponse,
   PriceObjectResponse,
   PriceWrappedResponse,
 } from "../../types/analytics";
+import { fetchJson } from "./client";
 
-/** Narrow: is plain object with possible price fields */
-function isPriceObject(x: unknown): x is PriceObjectResponse {
-  if (typeof x !== "object" || x === null) return false;
-  const o = x as Record<string, unknown>;
-  // heuristic: any of the known fields exists
-  return (
-    "close" in o ||
-    "adjustedClose" in o ||
-    "price" in o ||
-    "value" in o ||
-    "latest" in o ||
-    "date" in o ||
-    "tradingDate" in o ||
-    "asOf" in o
-  );
-}
-
-/** Narrow: is a known wrapper shape like { data: {...} } */
-function isWrappedPrice(x: unknown): x is PriceWrappedResponse {
-  if (typeof x !== "object" || x === null) return false;
-  const o = x as Record<string, unknown>;
-  return (
-    ("data" in o && isPriceObject(o.data)) ||
-    ("result" in o && isPriceObject(o.result)) ||
-    ("item" in o && isPriceObject(o.item))
-  );
-}
-
-/** Unwrap to the inner PriceObjectResponse if wrapped; otherwise return object directly. */
-function unwrapPrice(res: PriceApiResponse): PriceObjectResponse | null {
-  if (typeof res === "number") return null;
-  if (isWrappedPrice(res)) {
-    if ("data" in res && res.data) return res.data;
-    if ("result" in res && res.result) return res.result;
-    if ("item" in res && res.item) return res.item;
+function isPriceObject(value: unknown): value is PriceObjectResponse {
+  if (typeof value !== "object" || value === null) {
+    return false;
   }
-  if (isPriceObject(res)) return res;
-  return null;
+
+  const row = value as Record<string, unknown>;
+
+  return (
+    "close" in row ||
+    "adjustedClose" in row ||
+    "price" in row ||
+    "value" in row ||
+    "latest" in row ||
+    "date" in row ||
+    "tradingDate" in row ||
+    "asOf" in row
+  );
+}
+
+function isWrappedPrice(value: unknown): value is PriceWrappedResponse {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+
+  const row = value as Record<string, unknown>;
+
+  return (
+    ("data" in row && isPriceObject(row.data)) ||
+    ("result" in row && isPriceObject(row.result)) ||
+    ("item" in row && isPriceObject(row.item))
+  );
+}
+
+function unwrapPrice(response: PriceApiResponse): PriceObjectResponse | null {
+  if (typeof response === "number") {
+    return null;
+  }
+
+  if (isWrappedPrice(response)) {
+    if ("data" in response && response.data) {
+      return response.data;
+    }
+
+    if ("result" in response && response.result) {
+      return response.result;
+    }
+
+    if ("item" in response && response.item) {
+      return response.item;
+    }
+  }
+
+  return isPriceObject(response) ? response : null;
+}
+
+function pickPriceValue(price: PriceObjectResponse) {
+  if (typeof price.adjustedClose === "number") {
+    return { value: price.adjustedClose, adjusted: true };
+  }
+
+  if (typeof price.price === "number") {
+    return { value: price.price, adjusted: false };
+  }
+
+  if (typeof price.value === "number") {
+    return { value: price.value, adjusted: false };
+  }
+
+  if (typeof price.latest === "number") {
+    return { value: price.latest, adjusted: false };
+  }
+
+  if (typeof price.close === "number") {
+    return { value: price.close, adjusted: false };
+  }
+
+  return { value: null, adjusted: false };
+}
+
+function pickDate(price: PriceObjectResponse) {
+  if (typeof price.tradingDate === "string") {
+    return price.tradingDate;
+  }
+
+  if (typeof price.asOf === "string") {
+    return price.asOf;
+  }
+
+  if (typeof price.date === "string") {
+    return price.date;
+  }
+
+  return undefined;
 }
 
 export async function getLatestPrice(symbol: string): Promise<LatestMetric<number>> {
-  const sym = (symbol ?? "").trim().toUpperCase();
-  if (!sym) return { symbol: sym, value: null };
+  const normalizedSymbol = symbol.trim().toUpperCase();
+
+  if (!normalizedSymbol) {
+    return { symbol: normalizedSymbol, value: null };
+  }
 
   try {
-    const res = await fetchJson<PriceApiResponse>({
-      // Build the query string yourself; only 'path' is used by your fetchJson
-      path: `/api/analytics/price?symbol=${encodeURIComponent(sym)}`,
+    const response = await fetchJson<PriceApiResponse>({
+      path: `/api/analytics/price?symbol=${encodeURIComponent(normalizedSymbol)}`,
     });
 
-    // one-time debug log to verify the raw shape (safe to keep during dev)
-    // You can remove this later.
-    console.log("[analytics] raw price response", res);
-
-    let value: number | null = null;
-    let asOf: string | undefined;
-    let adjusted = false;
-    let source: string | undefined;
-    let unit: string | undefined;
-
-    if (typeof res === "number") {
-      value = res;
-    } else {
-      const obj = unwrapPrice(res);
-      if (obj) {
-        if (typeof obj.adjustedClose === "number") {
-          value = obj.adjustedClose;
-          adjusted = true;
-        } else if (typeof obj.price === "number") {
-          value = obj.price;
-        } else if (typeof obj.value === "number") {
-          value = obj.value;
-        } else if (typeof obj.latest === "number") {
-          value = obj.latest;
-        } else if (typeof obj.close === "number") {
-          value = obj.close; // <-- your backend returns "close"
-        }
-
-        if (typeof obj.tradingDate === "string") asOf = obj.tradingDate;
-        else if (typeof obj.asOf === "string") asOf = obj.asOf;
-        else if (typeof obj.date === "string") asOf = obj.date;
-
-        if (typeof obj.source === "string") source = obj.source;
-        if (typeof obj.currency === "string") unit = obj.currency;
-      }
+    if (typeof response === "number") {
+      return {
+        symbol: normalizedSymbol,
+        value: response,
+        unit: "USD",
+        adjusted: false,
+      };
     }
 
-    if (!unit) unit = "USD";
+    const price = unwrapPrice(response);
 
-    return { symbol: sym, value, asOf, unit, adjusted, source };
-  } catch (err) {
-    console.error("[analytics] getLatestPrice failed:", err);
-    return { symbol: sym, value: null };
+    if (!price) {
+      return {
+        symbol: normalizedSymbol,
+        value: null,
+        unit: "USD",
+        adjusted: false,
+      };
+    }
+
+    const { value, adjusted } = pickPriceValue(price);
+
+    return {
+      symbol: normalizedSymbol,
+      value,
+      asOf: pickDate(price),
+      unit: typeof price.currency === "string" ? price.currency : "USD",
+      adjusted,
+      source: typeof price.source === "string" ? price.source : undefined,
+    };
+  } catch {
+    return { symbol: normalizedSymbol, value: null };
   }
 }

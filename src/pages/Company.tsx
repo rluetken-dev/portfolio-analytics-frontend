@@ -1,54 +1,56 @@
-// src/pages/Company.tsx
-import { Link, useParams } from "react-router-dom";
 import { useState } from "react";
+import { Link, useParams } from "react-router-dom";
+
+import CompanyAnalyticsPanel from "../components/company/CompanyAnalyticsPanel";
+import CompanyCandleChart from "../components/company/CompanyCandleChart";
 import CompanyHeader from "../components/company/CompanyHeader";
 import CompanyKpis from "../components/company/CompanyKpis";
 import CompanyPriceChart from "../components/company/CompanyPriceChart";
-import CompanyCandleChart from "../components/company/CompanyCandleChart";
-import CompanyAnalyticsPanel from "../components/company/CompanyAnalyticsPanel";
+
+type ChartRange = {
+  start: number;
+  end: number;
+} | null;
 
 export default function CompanyPage() {
   const { symbol } = useParams<{ symbol?: string }>();
-  const sym = (symbol ?? "").trim().toUpperCase(); // Normalize once
-  // English: single source of truth for the visible window (indices in FULL price-series)
-  const [range, setRange] = useState<{ start: number; end: number } | null>(null);
+  const normalizedSymbol = symbol?.trim().toUpperCase() ?? "";
+  const [range, setRange] = useState<ChartRange>(null);
 
-  // Guard: if URL has no symbol, show a friendly hint instead of rendering children
-  if (!sym) {
+  if (!normalizedSymbol) {
     return (
-      <div style={{ padding: 16 }}>
-        <div style={{ marginBottom: 8, fontSize: 12 }}>
-          <Link to="/companies" style={{ textDecoration: "none" }}>
-            ← Back to Companies
-          </Link>
-        </div>
-        <div style={{ opacity: 0.8 }}>
-          Kein Symbol in der URL. Bitte eine Firma über die <Link to="/companies">Companies</Link>
-          -Liste öffnen.
-        </div>
-      </div>
+      <main style={{ padding: 16 }}>
+        <BackLink />
+        <p style={{ opacity: 0.8 }}>
+          No company symbol was provided. Open a company from the{" "}
+          <Link to="/companies">Companies</Link> list.
+        </p>
+      </main>
     );
   }
 
   return (
-    <div style={{ padding: 16 }}>
-      <div style={{ marginBottom: 8, fontSize: 12 }}>
-        <Link to="/companies" style={{ textDecoration: "none" }}>
-          ← Back to Companies
-        </Link>
-      </div>
-      <CompanyHeader symbol={sym} />
-      <CompanyKpis symbol={sym} />
+    <main style={{ padding: 16 }}>
+      <BackLink />
 
-      {/* Price = Controller (has brush) */}
-      <CompanyPriceChart symbol={sym} range={range} onRangeChange={setRange} />
-
-      {/* Candle = Follower (no own brush) */}
-      <CompanyCandleChart symbol={sym} range={range} height={320} />
+      <CompanyHeader symbol={normalizedSymbol} />
+      <CompanyKpis symbol={normalizedSymbol} />
+      <CompanyPriceChart symbol={normalizedSymbol} range={range} onRangeChange={setRange} />
+      <CompanyCandleChart symbol={normalizedSymbol} range={range} height={320} />
 
       <div style={{ marginTop: 32 }}>
-        <CompanyAnalyticsPanel symbol={sym} />
+        <CompanyAnalyticsPanel symbol={normalizedSymbol} />
       </div>
+    </main>
+  );
+}
+
+function BackLink() {
+  return (
+    <div style={{ marginBottom: 8, fontSize: 12 }}>
+      <Link to="/companies" style={{ textDecoration: "none" }}>
+        Back to Companies
+      </Link>
     </div>
   );
 }

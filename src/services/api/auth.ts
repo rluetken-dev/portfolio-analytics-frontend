@@ -1,6 +1,6 @@
-import { fetchJson } from "./client";
 import type { LoginRequest, LoginResponse, User } from "../../types/auth";
-import { setAccessToken, clearAccessToken } from "../../utils/token";
+import { clearAccessToken, setAccessToken } from "../../utils/token";
+import { fetchJson } from "./client";
 
 export interface RegisterRequest {
   username: string;
@@ -9,7 +9,10 @@ export interface RegisterRequest {
 
 export type RegisterResponse = LoginResponse;
 
-// Login
+export type RefreshResponse = {
+  accessToken: string;
+};
+
 export async function login(data: LoginRequest): Promise<LoginResponse> {
   const response = await fetchJson<LoginResponse, LoginRequest>({
     method: "POST",
@@ -17,27 +20,21 @@ export async function login(data: LoginRequest): Promise<LoginResponse> {
     body: data,
   });
 
-  // Save accessToken in memory
   setAccessToken(response.accessToken);
-
   return response;
 }
 
-// Logout
 export async function logout(): Promise<void> {
   try {
     await fetchJson({
       method: "POST",
       path: "/api/User/logout",
     });
-  } catch (err) {
-    console.warn("Logout request failed:", err);
   } finally {
-    clearAccessToken(); // immer AccessToken löschen
+    clearAccessToken();
   }
 }
 
-// Fetch me
 export async function fetchMe(): Promise<User> {
   return fetchJson<User>({
     method: "GET",
@@ -45,28 +42,20 @@ export async function fetchMe(): Promise<User> {
   });
 }
 
-// Refresh
-export async function refresh(): Promise<{ accessToken: string }> {
-  return await fetchJson<{ accessToken: string }>({
+export async function refresh(): Promise<RefreshResponse> {
+  return fetchJson<RefreshResponse>({
     method: "POST",
     path: "/api/User/refresh",
-    // 🔹 wichtig: Cookie mit dem RefreshToken mitschicken
-    headers: {
-      "Content-Type": "application/json",
-    },
   });
 }
 
-// Register
 export async function register(data: RegisterRequest): Promise<RegisterResponse> {
-  const response = await fetchJson<RegisterResponse>({
+  const response = await fetchJson<RegisterResponse, RegisterRequest>({
     method: "POST",
     path: "/api/User/register",
     body: data,
   });
 
-  // ✅ Save accessToken in memory (as with login)
   setAccessToken(response.accessToken);
-
   return response;
 }

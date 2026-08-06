@@ -1,16 +1,15 @@
-/**
- * Basic currency conversion utility.
- * Converts amounts between currencies using a rates cache (base: USD).
- */
 import { currencySymbols } from "../constants/currencySymbols";
+import type { CurrencyCode } from "../types/currency";
 
-// Define supported currency codes
-export type CurrencyCode = "USD" | "EUR" | "CHF" | "GBP" | "JPY";
-
-// Export the ExchangeRates type (so Context can import it)
 export type ExchangeRates = Record<CurrencyCode, number>;
 
-// Default static fallback rates (used before API update)
+type CurrencyApiResponse = {
+  usd?: Partial<Record<string, number>>;
+};
+
+const exchangeRateApiUrl =
+  "https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.json";
+
 let cachedRates: ExchangeRates = {
   USD: 1,
   EUR: 0.8641882,
@@ -19,93 +18,76 @@ let cachedRates: ExchangeRates = {
   JPY: 152.45126478,
 };
 
-// ✅ Add missing function: loadExchangeRates
-const API_URL =
-  "https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.json";
+const supportedCurrencies: CurrencyCode[] = ["USD", "EUR", "CHF", "GBP", "JPY"];
 
-/**
- * Load latest exchange rates (base = USD) from public CDN API.
- */
-export async function loadExchangeRates(): Promise<ExchangeRates> {
-  const resp = await fetch(API_URL);
-  if (!resp.ok) throw new Error(`Failed to fetch exchange rates: HTTP ${resp.status}`);
-
-  const data = await resp.json();
-  if (!data?.usd) throw new Error("Invalid exchange rate format");
-
-  cachedRates = {
-    ...cachedRates,
-    ...Object.fromEntries(
-      Object.entries(data.usd).filter(([, v]) => typeof v === "number" && !Number.isNaN(v)),
-    ),
-  };
-
-  return cachedRates;
+function isCurrencyCode(value: string): value is CurrencyCode {
+  return supportedCurrencies.includes(value as CurrencyCode);
 }
 
-/**
- * Convert between currencies.
- * @param amount Amount to convert
- * @param from Source currency (default: USD)
- * @param to Target currency (default: USD)
- */
-export function convertCurrency(
-  amount: number,
-  from: CurrencyCode = "USD",
-  to: CurrencyCode = "USD",
-): number {
-  if (from === to) return amount;
+export async function loadExchangeRates(): Promise<ExchangeRates> {
+  const response = await fetch(exchangeRateApiUrl);
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch exchange rates: HTTP ${response.status}`);
+  }
+
+  const data = (await response.json()) as CurrencyApiResponse;
+  const usdRates = data.usd;
+
+  if (!usdRates) {
+    throw new Error("Invalid exchange rate response.");
+  }
+
+  const nextRates = { ...cachedRates };
+
+  for (const currency of supportedCurrencies) {
+    const key = currency.toLowerCase();
+    const rate = usdRates[key];
+
+    if (typeof rate === "number" && Number.isFinite(rate)) {
+      nextRates[currency] = rate;
+    }
+  }
+
+  cachedRates = nextRates;
+  return getRates();
+}
+
+export function convertCurrency(amount: number, from: CurrencyCode = "USD", to: CurrencyCode = "USD") {
+  if (from === to) {
+    return amount;
+  }
 
   const fromRate = cachedRates[from];
   const toRate = cachedRates[to];
 
   if (!fromRate || !toRate) {
-    console.warn(`[convertCurrency] Unknown currency: ${from} or ${to}`);
     return amount;
   }
 
-  // Convert via USD as intermediary
-  const inUsd = amount / fromRate;
-  return inUsd * toRate;
+  return (amount / fromRate) * toRate;
 }
 
-/**
- * Replace part or all of the current exchange rates.
- */
-export function updateRates(newRates: Partial<ExchangeRates>): void {
+export function updateRates(newRates: Partial<ExchangeRates>) {
   cachedRates = { ...cachedRates, ...newRates };
 }
 
-/**
- * Get a snapshot of the current rates (for display/debug).
- */
 export function getRates(): ExchangeRates {
   return { ...cachedRates };
 }
 
-/**
- * Converts and formats an amount between currencies with symbol.
- */
-export function formatMoneyDynamic(
-  amount: number,
-  from: string = "USD",
-  to: string = "USD",
-): string {
-  try {
-    // Cast to CurrencyCode, since we know only valid codes will be passed
-    const converted = convertCurrency(amount, from as CurrencyCode, to as CurrencyCode);
+export function formatMoneyDynamic(amount: number, from: CurrencyCode = "USD", to: CurrencyCode = "USD") {
+  const convertedAmount = convertCurrency(amount, from, to);
+  const symbol = currencySymbols[to];
 
-    const symbol = currencySymbols[to.toUpperCase() as keyof typeof currencySymbols] || to;
+  return `${new Intl.NumberFormat(to === "USD" ? "en-US" : "de-DE", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(convertedAmount)} ${symbol}`;
+}
 
-    return (
-      new Intl.NumberFormat(to === "USD" ? "en-US" : "de-DE", {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      }).format(converted) +
-      " " +
-      symbol
-    );
-  } catch {
-    return `${amount.toFixed(2)} ${to}`;
-  }
+export function parseCurrencyCode(value: string, fallback: CurrencyCode = "USD"): CurrencyCode {
+  const normalizedValue = value.trim().toUpperCase();
+
+  return isCurrencyCode(normalizedValue) ? normalizedValue : fallback;
 }

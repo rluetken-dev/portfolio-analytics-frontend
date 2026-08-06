@@ -82,6 +82,14 @@ function formatPercent(value: number | null) {
   return value === null || Number.isNaN(value) ? "n/a" : `${(value * 100).toFixed(1)}%`;
 }
 
+function metricHint(status: number | undefined): string | undefined {
+  if (!status || status === 200 || status === 400 || status === 404) {
+    return undefined;
+  }
+
+  return `HTTP ${status}`;
+}
+
 export default function CompanyKpis({ symbol }: CompanyKpisProps) {
   const normalizedSymbol = useMemo(() => symbol.trim().toUpperCase(), [symbol]);
   const { fadeClass } = useCurrencyFade();
@@ -150,7 +158,7 @@ export default function CompanyKpis({ symbol }: CompanyKpisProps) {
                 ? price.asOf
                   ? `as of ${price.asOf}${price.adjusted ? " (adjusted)" : ""}`
                   : undefined
-                : `HTTP ${price.status}`,
+                : metricHint(price.status),
           },
           { label: "P/E", value: formatRatio(peResult.value) },
           { label: "ROE", value: formatPercent(roeResult.value) },

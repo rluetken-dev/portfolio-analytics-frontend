@@ -118,6 +118,28 @@ The frontend is designed to work with the backend's local demo data.
 
 External provider keys are only required when the backend performs live data ingestion from external financial data providers. Without keys, the app can still support local authentication, portfolio workflows, and database-backed demo views.
 
+## Screenshots
+
+### Companies Overview
+
+![Companies overview](./docs/screenshots/companies-overview.png)
+
+### Company Detail With Demo Data
+
+![Company detail with demo data](./docs/screenshots/company-detail-demo-data.png)
+
+### Trade Dialog With Cached Demo Price
+
+![Trade dialog with cached demo price](./docs/screenshots/trade-dialog-cached-price.png)
+
+### Company Detail Without Cached Data
+
+![Company detail without cached data](./docs/screenshots/company-detail-no-data.png)
+
+### Login
+
+![Login screen](./docs/screenshots/login.png)
+
 ## Project Structure
 
 ```text

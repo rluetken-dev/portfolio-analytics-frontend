@@ -223,6 +223,24 @@ Live provider functionality depends on backend configuration:
 
 Without provider keys, the frontend should still be able to use local authentication, portfolio workflows, stored companies, stored prices, and seeded demo data exposed by the backend.
 
+## Screenshots
+
+The main README includes representative frontend screenshots for:
+
+- companies overview
+- company detail with seeded demo data
+- trade dialog using cached demo prices
+- company detail without cached demo data
+- login screen
+
+Screenshot files are stored in:
+
+```text
+docs/screenshots/
+```
+
+See the root [README.md](../README.md#screenshots) for the rendered screenshot section.
+
 ## Scripts
 
 ```powershell

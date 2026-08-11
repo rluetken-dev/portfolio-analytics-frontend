@@ -5,6 +5,7 @@
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.8.3-blue)
 ![Vite](https://img.shields.io/badge/Vite-7.1.2-purple)
 ![Node](https://img.shields.io/badge/node-%3E%3D20-green)
+[![Release](https://img.shields.io/github/v/release/rluetken-dev/portfolio-analytics-frontend)](https://github.com/rluetken-dev/portfolio-analytics-frontend/releases/latest)
 
 React/Vite frontend for the Portfolio Analytics backend.
 
